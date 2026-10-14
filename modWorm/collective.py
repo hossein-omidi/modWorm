@@ -1,10 +1,4 @@
-"""Small-group geometry primitives for a future synchronized shared-world solver.
-
-This module computes pairwise capsule-contact forces on body centerline nodes.
-It does not integrate those forces through modWorm's body ODE; a world adapter
-must map nodal forces to generalized body forces before contact can change
-locomotion.
-"""
+"""Capsule-contact geometry primitives used by synchronized shared-world runs."""
 
 from __future__ import annotations
 
@@ -127,8 +121,9 @@ def capsule_contact_forces(
                 tangent = first[index_a + 1] - first[index_a]
                 tangent_norm = float(np.linalg.norm(tangent))
                 if tangent_norm <= np.finfo(float).eps:
-                    raise ValueError("contact normal is undefined for coincident degenerate segments")
-                normal = np.array([-tangent[1], tangent[0]]) / tangent_norm
+                    normal = np.array([1.0, 0.0])
+                else:
+                    normal = np.array([-tangent[1], tangent[0]]) / tangent_norm
 
             contact_velocity_a = (
                 (1.0 - weight_a) * velocity_first[index_a]

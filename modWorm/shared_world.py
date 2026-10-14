@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from inspect import signature
 from typing import Any
 
 import numpy as np
@@ -75,16 +76,8 @@ def _body_centerline_and_velocity(
     x, y, xdot, ydot = body_dynamics.fwd_body_Coordinates(
         body, x1, y1, xdot1, ydot1, phi, phidot
     )
-    half_length = 0.5 * body.body_SegLength
-    centerline = np.column_stack(
-        (x - half_length * np.cos(phi), y - half_length * np.sin(phi))
-    )
-    velocity = np.column_stack(
-        (
-            xdot + half_length * np.sin(phi) * phidot,
-            ydot - half_length * np.cos(phi) * phidot,
-        )
-    )
+    centerline = np.column_stack((x, y))
+    velocity = np.column_stack((xdot, ydot))
     return centerline, velocity
 
 
@@ -94,31 +87,43 @@ def _contact_forces(
     *,
     stiffness: float,
     damping: float,
-    radii: tuple[float, float],
+    radii: np.ndarray,
 ) -> list[np.ndarray]:
     forces = [
         np.zeros((agent.muscle_body.body_SegCount, 2), dtype=float)
         for agent in agents
     ]
-    if len(agents) != 2:
-        return forces
-
-    centerline_a, velocity_a = _body_centerline_and_velocity(
-        agents[0].muscle_body, body_states[0]
-    )
-    centerline_b, velocity_b = _body_centerline_and_velocity(
-        agents[1].muscle_body, body_states[1]
-    )
-    forces[0], forces[1] = capsule_contact_forces(
-        centerline_a,
-        centerline_b,
-        radius_a=radii[0],
-        radius_b=radii[1],
-        stiffness=stiffness,
-        damping=damping,
-        velocity_a=velocity_a,
-        velocity_b=velocity_b,
-    )
+    centerlines = [
+        _body_centerline_and_velocity(agent.muscle_body, state)
+        for agent, state in zip(agents, body_states)
+    ]
+    bounds = [
+        (
+            centerline.min(axis=0) - radius,
+            centerline.max(axis=0) + radius,
+        )
+        for (centerline, _), radius in zip(centerlines, radii)
+    ]
+    for index_a in range(len(agents)):
+        for index_b in range(index_a + 1, len(agents)):
+            lower_a, upper_a = bounds[index_a]
+            lower_b, upper_b = bounds[index_b]
+            if np.any(upper_a < lower_b) or np.any(upper_b < lower_a):
+                continue
+            centerline_a, velocity_a = centerlines[index_a]
+            centerline_b, velocity_b = centerlines[index_b]
+            pair_force_a, pair_force_b = capsule_contact_forces(
+                centerline_a,
+                centerline_b,
+                radius_a=float(radii[index_a]),
+                radius_b=float(radii[index_b]),
+                stiffness=stiffness,
+                damping=damping,
+                velocity_a=velocity_a,
+                velocity_b=velocity_b,
+            )
+            forces[index_a] += pair_force_a
+            forces[index_b] += pair_force_b
     return forces
 
 
@@ -160,7 +165,7 @@ def run_shared_world(
     sensory_contact: bool = False,
     contact_stiffness: float = 10.0,
     contact_damping: float = 0.0,
-    contact_radii: tuple[float, float] | None = None,
+    contact_radii: float | tuple[float, ...] | list[float] | np.ndarray | None = None,
     sensory_gain_pA_per_force: float = 0.0,
     neural_rtol: float = 5e-6,
     neural_atol: float = 1e-3,
@@ -180,8 +185,8 @@ def run_shared_world(
         raise ValueError("times must contain at least two samples")
     if not np.isfinite(times).all() or np.any(np.diff(times) <= 0.0):
         raise ValueError("times must be finite and strictly increasing")
-    if len(agents) not in (1, 2):
-        raise ValueError("the shared-world solver currently supports one or two worms")
+    if not agents:
+        raise ValueError("the shared world requires at least one worm")
     if len({id(agent.nervous_system) for agent in agents}) != len(agents):
         raise ValueError("worms must not share nervous-system instances")
     if len({id(agent.muscle_body) for agent in agents}) != len(agents):
@@ -193,16 +198,21 @@ def run_shared_world(
     if not np.isfinite(sensory_gain_pA_per_force) or sensory_gain_pA_per_force < 0.0:
         raise ValueError("sensory_gain_pA_per_force must be finite and nonnegative")
     if contact_radii is None:
-        radii = tuple(
-            float(np.mean(agent.muscle_body.body_RadiusH))
-            for agent in agents[:2]
+        radii = np.asarray(
+            [float(np.mean(agent.muscle_body.body_RadiusH)) for agent in agents]
         )
-        if len(agents) == 1:
-            radii = (radii[0], radii[0])
     else:
-        radii = tuple(float(radius) for radius in contact_radii)
-        if len(radii) != 2 or not all(np.isfinite(r) and r >= 0.0 for r in radii):
-            raise ValueError("contact_radii must contain two finite nonnegative radii")
+        radii = np.asarray(contact_radii, dtype=float)
+        if radii.ndim == 0:
+            radii = np.full(len(agents), float(radii))
+        if (
+            radii.shape != (len(agents),)
+            or not np.isfinite(radii).all()
+            or np.any(radii < 0.0)
+        ):
+            raise ValueError(
+                "contact_radii must be a nonnegative scalar or one radius per worm"
+            )
 
     inputs_and_states = [_validate_agent(agent, times) for agent in agents]
     external_inputs = [item[0] for item in inputs_and_states]
@@ -281,7 +291,7 @@ def run_shared_world(
             current_states,
             stiffness=contact_stiffness,
             damping=contact_damping,
-            radii=(radii[0], radii[1]),
+            radii=radii,
         )
 
     for step, (time_start, time_stop) in enumerate(zip(times[:-1], times[1:])):
@@ -352,10 +362,26 @@ def run_shared_world(
                     kwargs["pdf_signal_state"] = signal
                 return model.forward_Network(t, state, **kwargs)
             kwargs: dict[str, Any] = {}
-            if hasattr(network, "forward_network_Jacobian"):
-                kwargs["jac"] = lambda t, state, model=network: csc_matrix(
-                    model.forward_network_Jacobian(t, state)
+            jacobian = getattr(network, "forward_network_Jacobian", None)
+            if callable(jacobian):
+                accepts_contact = (
+                    "contact_input_current" in signature(jacobian).parameters
                 )
+                if accepts_contact or not np.any(contact_inputs[index]):
+                    kwargs["jac"] = (
+                        lambda t, state, model=network, stimulus=contact_inputs[index]:
+                        csc_matrix(
+                            model.forward_network_Jacobian(
+                                t,
+                                state,
+                                **(
+                                    {"contact_input_current": stimulus}
+                                    if accepts_contact
+                                    else {}
+                                ),
+                            )
+                        )
+                    )
             neural_solution = integrate.solve_ivp(
                 rhs,
                 (float(time_start), float(time_stop)),

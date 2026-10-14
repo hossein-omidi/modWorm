@@ -116,7 +116,9 @@ class CelegansWorm_NervousSystem:
 
         return np.concatenate([dv, ds])
 
-    def forward_network_Jacobian(self, t, y):
+    def forward_network_Jacobian(
+        self, t, y, contact_input_current=None, external_current=None
+    ):
         
         """
             (Optional)
@@ -133,7 +135,10 @@ class CelegansWorm_NervousSystem:
         v, s = np.split(y, 2)
 
         J1, J2 = n_inter.fwd_jacobian12_Linear(self, v, s, t)
-        J3, J4 = n_inter.fwd_jacobian34_Linear(self, v, s, self.compute_Vth(self.interp_i_Ext(t)))
+        i_Ext = self.interp_i_Ext(t) if external_current is None else external_current
+        if contact_input_current is not None:
+            i_Ext = i_Ext + contact_input_current
+        J3, J4 = n_inter.fwd_jacobian34_Linear(self, v, s, self.compute_Vth(i_Ext))
 
         J_row1 = np.hstack((J1, J2))
         J_row2 = np.hstack((J3, J4))
@@ -206,13 +211,18 @@ class CelegansWorm_NervousSystem_Waveforce:
 
         return np.concatenate([dv, ds])
 
-    def forward_network_Jacobian(self, t, y):
+    def forward_network_Jacobian(
+        self, t, y, contact_input_current=None, external_current=None
+    ):
 
         v, s = np.split(y, 2)
         v = v + self.interp_v_Ext(t) # Add waveforce to voltage
 
         J1, J2 = n_inter.fwd_jacobian12_Linear(self, v, s, t)
-        J3, J4 = n_inter.fwd_jacobian34_Linear(self, v, s, self.compute_Vth(self.interp_i_Ext(t)))
+        i_Ext = self.interp_i_Ext(t) if external_current is None else external_current
+        if contact_input_current is not None:
+            i_Ext = i_Ext + contact_input_current
+        J3, J4 = n_inter.fwd_jacobian34_Linear(self, v, s, self.compute_Vth(i_Ext))
 
         J_row1 = np.hstack((J1, J2))
         J_row2 = np.hstack((J3, J4))
@@ -332,13 +342,18 @@ class CelegansWorm_NervousSystem_PPC:
 
         return np.concatenate([dv, ds])
 
-    def forward_network_Jacobian(self, t, y):
+    def forward_network_Jacobian(
+        self, t, y, contact_input_current=None, external_current=None
+    ):
 
         v, s = np.split(y, 2)
         v = v + self.input_FDB # Add FDB input to the voltage
 
         J1, J2 = n_inter.fwd_jacobian12_Linear(self, v, s, t)
-        J3, J4 = n_inter.fwd_jacobian34_Linear(self, v, s, self.compute_Vth(self.interp_i_Ext(t)))
+        i_Ext = self.interp_i_Ext(t) if external_current is None else external_current
+        if contact_input_current is not None:
+            i_Ext = i_Ext + contact_input_current
+        J3, J4 = n_inter.fwd_jacobian34_Linear(self, v, s, self.compute_Vth(i_Ext))
 
         J_row1 = np.hstack((J1, J2))
         J_row2 = np.hstack((J3, J4))

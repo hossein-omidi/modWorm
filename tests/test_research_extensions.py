@@ -19,10 +19,14 @@ from modWorm.predefined_classes_nv import CelegansWorm_NervousSystem
 from modWorm.pdf_modulation import PDFR1Modulation
 from modWorm.network_dynamics import fwd_activity_Chemical
 from modWorm.proprioception_simulation import configure_ode_solver
+from modWorm.serotonin.serotonin_modulation import NEURON_INDICES, SerotoninModulation
 from modWorm.shared_world import (
     WormAgent,
+    _body_centerline_and_velocity,
+    _contact_forces,
     contact_sensory_current,
     run_single_worm,
+    run_shared_world,
     run_two_worms,
 )
 
@@ -165,6 +169,53 @@ class PDFR1Tests(unittest.TestCase):
 
         np.testing.assert_array_equal(modulated_jacobian, base_jacobian)
 
+    def test_contact_current_jacobian_matches_rhs_with_neuromodulation(self):
+        network = CelegansWorm_NervousSystem(
+            np.zeros((279, 279)), np.zeros((279, 279))
+        )
+        network.interp_i_Ext = lambda time: np.zeros(279)
+        network.initcond = np.concatenate(
+            (np.full(279, -35.0), np.full(279, 0.1))
+        )
+        network.serotonin_modulation = SerotoninModulation(concentration=5.0)
+        pdf = PDFR1Modulation(
+            concentration=5.0, coupling_gain_pA_per_signal=1.0
+        )
+        pdf.advance(0.1, 0.0)
+        network.pdfr1_modulation = pdf
+        contact = np.zeros(279)
+        contact[NEURON_INDICES["ALML"]] = 2.0
+        state = network.initcond.copy()
+        time = 0.02
+        for stimulus in (np.zeros(279), contact):
+            analytic = network.forward_network_Jacobian(
+                time, state, contact_input_current=stimulus
+            )
+            for column in (
+                NEURON_INDICES["ALML"],
+                network.network_Size + NEURON_INDICES["ALML"],
+            ):
+                baseline = network.forward_Network(
+                    time,
+                    state,
+                    contact_input_current=stimulus,
+                    pdf_signal_state=pdf.signal_state,
+                )
+                perturbed = state.copy()
+                perturbed[column] += 1e-5
+                numerical_column = (
+                    network.forward_Network(
+                        time,
+                        perturbed,
+                        contact_input_current=stimulus,
+                        pdf_signal_state=pdf.signal_state,
+                    )
+                    - baseline
+                ) / 1e-5
+                np.testing.assert_allclose(
+                    analytic[:, column], numerical_column, rtol=1e-5, atol=1e-6
+                )
+
 
 class ContactMechanicsTests(unittest.TestCase):
     def test_capsule_contact_is_equal_opposite_and_separation_is_force_free(self):
@@ -182,6 +233,12 @@ class ContactMechanicsTests(unittest.TestCase):
         self.assertGreater(np.linalg.norm(force_a), 0.0)
         np.testing.assert_allclose(force_a.sum(axis=0) + force_b.sum(axis=0), [0.0, 0.0])
 
+        moment_a = np.sum(first[:, 0] * force_a[:, 1] - first[:, 1] * force_a[:, 0])
+        moment_b = np.sum(
+            touching[:, 0] * force_b[:, 1] - touching[:, 1] * force_b[:, 0]
+        )
+        self.assertAlmostEqual(moment_a + moment_b, 0.0, places=12)
+
         no_force_a, no_force_b = capsule_contact_forces(
             first,
             separated,
@@ -191,6 +248,21 @@ class ContactMechanicsTests(unittest.TestCase):
         )
         np.testing.assert_array_equal(no_force_a, np.zeros_like(first))
         np.testing.assert_array_equal(no_force_b, np.zeros_like(separated))
+
+    def test_coincident_degenerate_capsules_have_finite_action_reaction(self):
+        point = np.zeros((2, 2))
+        force_a, force_b = capsule_contact_forces(
+            point,
+            point,
+            radius_a=0.1,
+            radius_b=0.1,
+            stiffness=10.0,
+        )
+        self.assertTrue(np.isfinite(force_a).all())
+        self.assertTrue(np.isfinite(force_b).all())
+        np.testing.assert_allclose(
+            force_a.sum(axis=0) + force_b.sum(axis=0), [0.0, 0.0]
+        )
 
     def test_contact_damping_only_opposes_approach(self):
         first = np.array([[0.0, 0.0], [1.0, 0.0]])
@@ -480,7 +552,7 @@ class _IndependentTestNetwork:
             (-0.2 * (voltage + 35.0) + current, 0.01 * (voltage + 35.0) - 0.01 * synaptic)
         )
 
-    def forward_network_Jacobian(self, time, state):
+    def forward_network_Jacobian(self, time, state, contact_input_current=None):
         diagonal = np.concatenate(
             (-0.2 * np.ones(self.network_Size), -0.01 * np.ones(self.network_Size))
         )
@@ -497,6 +569,28 @@ class SharedWorldTests(unittest.TestCase):
         body = copy.deepcopy(self.body_template)
         body.initcond[1] += y_offset
         return WormAgent(network, body, np.zeros(279), name)
+
+    def test_contact_geometry_uses_body_force_application_coordinates(self):
+        body = copy.deepcopy(self.body_template)
+        rng = np.random.default_rng(12)
+        state = body.initcond.copy()
+        state[len(state) // 2 :] = rng.normal(size=len(state) // 2)
+        q, qdot = np.split(state, 2)
+        count = body.body_SegCount
+        x, y, xdot, ydot = fwd_body_Coordinates(
+            body,
+            q[0],
+            q[1],
+            qdot[0],
+            qdot[1],
+            q[2 : 2 + count],
+            qdot[2 : 2 + count],
+        )
+
+        centerline, velocity = _body_centerline_and_velocity(body, state)
+
+        np.testing.assert_allclose(centerline, np.column_stack((x, y)))
+        np.testing.assert_allclose(velocity, np.column_stack((xdot, ydot)))
 
     def test_two_noninteracting_worms_match_independent_runs(self):
         times = np.array([0.0, 0.01, 0.02])
@@ -535,6 +629,58 @@ class SharedWorldTests(unittest.TestCase):
             np.testing.assert_array_equal(
                 result["contact_force"], np.zeros_like(result["contact_force"])
             )
+
+    def test_four_independent_worms_run_on_shared_clock(self):
+        times = np.array([0.0, 0.01])
+        agents = [
+            self.make_agent("first", 0.0),
+            self.make_agent("second", 1.0),
+            self.make_agent("third", 2.0),
+            self.make_agent("fourth", 3.0),
+        ]
+        world = run_shared_world(
+            agents,
+            times,
+            mechanical_contact=True,
+            contact_radii=(0.05, 0.05, 0.05, 0.05),
+        )
+        self.assertEqual(len(world["agents"]), 4)
+        for result in world["agents"]:
+            np.testing.assert_array_equal(
+                result["time"], times
+            )
+            np.testing.assert_array_equal(
+                result["contact_force"], np.zeros_like(result["contact_force"])
+            )
+        for first in range(len(world["agents"])):
+            for second in range(first + 1, len(world["agents"])):
+                self.assertFalse(
+                    np.shares_memory(
+                        world["agents"][first]["body_state"],
+                        world["agents"][second]["body_state"],
+                    )
+                )
+
+    def test_three_worm_contact_forces_accumulate_on_shared_agent(self):
+        agents = [
+            self.make_agent("center", 0.0),
+            self.make_agent("upper", 0.05),
+            self.make_agent("lower", -0.05),
+        ]
+        states = [agent.muscle_body.initcond.copy() for agent in agents]
+        forces = _contact_forces(
+            agents,
+            states,
+            stiffness=0.2,
+            damping=0.0,
+            radii=np.array([0.05, 0.05, 0.05]),
+        )
+        self.assertGreater(np.linalg.norm(forces[0]), 0.0)
+        self.assertGreater(np.linalg.norm(forces[1]), 0.0)
+        self.assertGreater(np.linalg.norm(forces[2]), 0.0)
+        np.testing.assert_allclose(
+            sum(force.sum(axis=0) for force in forces), [0.0, 0.0], atol=1e-12
+        )
 
     def test_mechanical_contact_changes_integrated_body_motion(self):
         times = np.array([0.0, 0.01, 0.02])
@@ -604,6 +750,43 @@ class SharedWorldTests(unittest.TestCase):
             0.0, body.initcond, muscle, nodal_force
         )
         self.assertGreater(np.linalg.norm(with_contact - no_contact), 0.0)
+
+        def center_of_mass_acceleration(derivative):
+            state = body.initcond
+            q, qdot = np.split(state, 2)
+            qddot = derivative[len(q) :]
+            count = body.body_SegCount
+            phi = q[2 : 2 + count]
+            phidot = qdot[2 : 2 + count]
+            phi_ddot = qddot[2 : 2 + count]
+            cos_term = np.cos(phi) * phidot**2 + np.sin(phi) * phi_ddot
+            sin_term = np.sin(phi) * phidot**2 - np.cos(phi) * phi_ddot
+            x_relative_acceleration = np.zeros(count)
+            y_relative_acceleration = np.zeros(count)
+            half_lengths = body.body_SegLength[1:] / 2.0
+            x_relative_acceleration[1:] = np.cumsum(
+                -half_lengths * (cos_term[:-1] + cos_term[1:])
+            )
+            y_relative_acceleration[1:] = np.cumsum(
+                -half_lengths * (sin_term[:-1] + sin_term[1:])
+            )
+            total_mass = np.sum(body.body_Mass)
+            return np.array(
+                [
+                    qddot[0]
+                    + np.dot(body.body_Mass, x_relative_acceleration) / total_mass,
+                    qddot[1]
+                    + np.dot(body.body_Mass, y_relative_acceleration) / total_mass,
+                ]
+            )
+
+        np.testing.assert_allclose(
+            center_of_mass_acceleration(with_contact)
+            - center_of_mass_acceleration(no_contact),
+            nodal_force.sum(axis=0) / np.sum(body.body_Mass),
+            rtol=1e-10,
+            atol=1e-10,
+        )
 
     def test_repeated_contact_stays_finite_and_refinement_converges(self):
         coarse_times = np.array([0.0, 0.01, 0.02])
