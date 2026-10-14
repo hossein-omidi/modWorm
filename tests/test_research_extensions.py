@@ -1,16 +1,30 @@
 import unittest
 import warnings
+import copy
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
+from scipy import integrate
+from scipy.sparse import csc_matrix
 
 from modWorm.behavior_analysis import locomotion_metrics, population_metrics
+from modWorm import body_simulations, network_simulations
+from modWorm.body_dynamics import fwd_body_Coordinates, fwd_body_D2Coordinates
 from modWorm.collective import capsule_contact_forces
 from modWorm.network_interactions import fwd_jacobian12_Linear, fwd_jacobian34_Linear
+from modWorm.numerics import NumericalIntegrationError, validate_ivp_solution, validate_ode_step
+from modWorm.predefined_classes_mb import CelegansWorm_MuscleBody
 from modWorm.predefined_classes_nv import CelegansWorm_NervousSystem
 from modWorm.pdf_modulation import PDFR1Modulation
 from modWorm.network_dynamics import fwd_activity_Chemical
 from modWorm.proprioception_simulation import configure_ode_solver
+from modWorm.shared_world import (
+    WormAgent,
+    contact_sensory_current,
+    run_single_worm,
+    run_two_worms,
+)
 
 
 class BehavioralMetricTests(unittest.TestCase):
@@ -206,6 +220,41 @@ class ContactMechanicsTests(unittest.TestCase):
         np.testing.assert_allclose(damped_a.sum(axis=0) + damped_b.sum(axis=0), [0.0, 0.0])
 
 
+class SparseNeuralJacobianTests(unittest.TestCase):
+    def test_sparse_bdf_jacobian_matches_dense_network_integration(self):
+        network = CelegansWorm_NervousSystem(
+            np.zeros((279, 279)), np.zeros((279, 279))
+        )
+        network.initcond = np.zeros_like(network.initcond)
+        network.interp_i_Ext = lambda time: np.zeros(network.network_Size)
+        sample_times = np.array([0.0, 0.01])
+        dense = integrate.solve_ivp(
+            network.forward_Network,
+            (sample_times[0], sample_times[-1]),
+            network.initcond,
+            method="BDF",
+            t_eval=sample_times,
+            jac=network.forward_network_Jacobian,
+            rtol=5e-6,
+            atol=1e-3,
+        )
+        sparse = integrate.solve_ivp(
+            network.forward_Network,
+            (sample_times[0], sample_times[-1]),
+            network.initcond,
+            method="BDF",
+            t_eval=sample_times,
+            jac=lambda time, state: csc_matrix(
+                network.forward_network_Jacobian(time, state)
+            ),
+            rtol=5e-6,
+            atol=1e-3,
+        )
+        self.assertTrue(dense.success, dense.message)
+        self.assertTrue(sparse.success, sparse.message)
+        np.testing.assert_allclose(sparse.y, dense.y, rtol=1e-7, atol=1e-8)
+
+
 class SolverConfigurationTests(unittest.TestCase):
     def test_stiff_body_uses_supported_vode_bdf_stepper(self):
         neural = SimpleNamespace(
@@ -247,6 +296,356 @@ class SolverConfigurationTests(unittest.TestCase):
         self.assertTrue(np.isfinite(activity).all())
         np.testing.assert_allclose(activity, [0.0, 0.5, 1.0])
         self.assertTrue(np.isfinite(jacobian).all())
+
+
+class NumericalResultValidationTests(unittest.TestCase):
+    def test_ivp_failure_incomplete_timing_and_nonfinite_states_raise(self):
+        expected = np.array([0.0, 1.0])
+        failed = SimpleNamespace(
+            success=False,
+            t=np.array([0.0]),
+            y=np.array([[1.0]]),
+            message="step limit reached",
+        )
+        with self.assertRaisesRegex(NumericalIntegrationError, "step limit reached"):
+            validate_ivp_solution(failed, expected, 1, operation="test")
+
+        incomplete = SimpleNamespace(
+            success=True,
+            t=np.array([0.0]),
+            y=np.array([[1.0]]),
+            message="success",
+        )
+        with self.assertRaisesRegex(NumericalIntegrationError, "incomplete"):
+            validate_ivp_solution(incomplete, expected, 1, operation="test")
+
+        mistimed = SimpleNamespace(
+            success=True,
+            t=np.array([0.0, 0.9]),
+            y=np.array([[1.0, 0.5]]),
+            message="success",
+        )
+        with self.assertRaisesRegex(NumericalIntegrationError, "mistimed"):
+            validate_ivp_solution(mistimed, expected, 1, operation="test")
+
+        nonfinite = SimpleNamespace(
+            success=True,
+            t=expected,
+            y=np.array([[1.0, np.nan]]),
+            message="success",
+        )
+        with self.assertRaisesRegex(NumericalIntegrationError, "non-finite"):
+            validate_ivp_solution(nonfinite, expected, 1, operation="test")
+
+    def test_legacy_ode_step_rejects_early_or_nonfinite_state(self):
+        solver = SimpleNamespace(
+            y=np.array([1.0]),
+            t=0.5,
+            successful=lambda: True,
+        )
+        with self.assertRaisesRegex(NumericalIntegrationError, "stopped early"):
+            validate_ode_step(
+                solver, 1.0, 1, operation="body", step_index=1
+            )
+
+        solver.t = 1.0
+        solver.y = np.array([np.inf])
+        with self.assertRaisesRegex(NumericalIntegrationError, "stopped early"):
+            validate_ode_step(
+                solver, 1.0, 1, operation="body", step_index=1
+            )
+
+    def test_network_and_body_solve_ivp_paths_raise_on_partial_results(self):
+        partial = SimpleNamespace(
+            success=True,
+            t=np.array([0.0]),
+            y=np.ones((1, 1)),
+            message="success",
+        )
+        single_neuron = SimpleNamespace(
+            network_Size=1,
+            initcond=np.array([0.0]),
+            forward_Network=lambda time, state: -state,
+        )
+        network_prep = SimpleNamespace(
+            tf=1.0, nsteps=2, input_mat=np.zeros((2, 1))
+        )
+        with patch.object(network_simulations.integrate, "solve_ivp", return_value=partial):
+            with self.assertRaises(NumericalIntegrationError):
+                network_simulations.integrate_ode(
+                    single_neuron, network_prep, 1e-6, 1e-9
+                )
+
+        body = SimpleNamespace(
+            initcond=np.zeros(52),
+            body_SegCount=24,
+            forward_Body=lambda time, state: -state,
+        )
+        body_prep = SimpleNamespace(tf=1.0, nsteps=2)
+        with patch.object(body_simulations.integrate, "solve_ivp", return_value=partial):
+            with self.assertRaises(NumericalIntegrationError):
+                body_simulations.integrate_ode(
+                    body, body_prep, False, 1e-6, 1e-9
+                )
+
+
+class BodyEquationEquivalenceTests(unittest.TestCase):
+    def test_vectorized_body_kinematics_matches_original_recurrence(self):
+        body = CelegansWorm_MuscleBody(np.zeros((96, 279)))
+        rng = np.random.default_rng(17)
+        phi = rng.normal(size=body.body_SegCount)
+        phidot = rng.normal(size=body.body_SegCount)
+        x1, y1, xdot1, ydot1 = 1.2, -0.7, 0.4, -0.2
+
+        expected = [np.zeros(body.body_SegCount) for _ in range(4)]
+        x_ref, y_ref, xdot_ref, ydot_ref = expected
+        x_ref[0], y_ref[0], xdot_ref[0], ydot_ref[0] = x1, y1, xdot1, ydot1
+        for index in range(1, body.body_SegCount):
+            previous = index - 1
+            half = body.body_SegLength[index] / 2.0
+            x_ref[index] = x_ref[previous] + half * (
+                np.cos(phi[previous]) + np.cos(phi[index])
+            )
+            y_ref[index] = y_ref[previous] + half * (
+                np.sin(phi[previous]) + np.sin(phi[index])
+            )
+            xdot_ref[index] = xdot_ref[previous] - half * (
+                np.sin(phi[previous]) * phidot[previous]
+                + np.sin(phi[index]) * phidot[index]
+            )
+            ydot_ref[index] = ydot_ref[previous] + half * (
+                np.cos(phi[previous]) * phidot[previous]
+                + np.cos(phi[index]) * phidot[index]
+            )
+        observed = fwd_body_Coordinates(
+            body, x1, y1, xdot1, ydot1, phi, phidot
+        )
+        for actual, reference in zip(observed, expected):
+            np.testing.assert_allclose(actual, reference, rtol=1e-13, atol=1e-13)
+
+    def test_vectorized_coordinate_acceleration_matches_original_recurrence(self):
+        body = CelegansWorm_MuscleBody(np.zeros((96, 279)))
+        rng = np.random.default_rng(29)
+        phi = rng.normal(size=body.body_SegCount)
+        phidot = rng.normal(size=body.body_SegCount)
+        phi_ddot = rng.normal(size=body.body_SegCount)
+        wx = rng.normal(size=body.body_SegCount)
+        wy = rng.normal(size=body.body_SegCount)
+
+        expected_x = np.zeros(body.body_SegCount)
+        expected_y = np.zeros(body.body_SegCount)
+        for index in range(1, body.body_SegCount):
+            half = body.body_SegLength[index] / 2.0
+            left_x = np.cos(phi[index - 1]) * phidot[index - 1] ** 2 + np.sin(phi[index - 1]) * phi_ddot[index - 1]
+            right_x = np.cos(phi[index]) * phidot[index] ** 2 + np.sin(phi[index]) * phi_ddot[index]
+            left_y = np.sin(phi[index - 1]) * phidot[index - 1] ** 2 - np.cos(phi[index - 1]) * phi_ddot[index - 1]
+            right_y = np.sin(phi[index]) * phidot[index] ** 2 - np.cos(phi[index]) * phi_ddot[index]
+            expected_x[index] = expected_x[index - 1] - half * (left_x + right_x)
+            expected_y[index] = expected_y[index - 1] - half * (left_y + right_y)
+
+        actual_x, actual_y = fwd_body_D2Coordinates(
+            body, phi, phidot, phi_ddot, wx, wy
+        )
+        mass_sum = np.sum(body.body_Mass)
+        self.assertAlmostEqual(
+            actual_x,
+            np.reciprocal(mass_sum)
+            * np.sum(body.body_SegLength * wx - body.body_Mass * expected_x),
+            places=12,
+        )
+        self.assertAlmostEqual(
+            actual_y,
+            np.reciprocal(mass_sum)
+            * np.sum(body.body_SegLength * wy - body.body_Mass * expected_y),
+            places=12,
+        )
+
+
+class _IndependentTestNetwork:
+    def __init__(self):
+        self.network_Size = 279
+        self.initcond = np.concatenate(
+            (np.full(self.network_Size, -35.0), np.zeros(self.network_Size))
+        )
+
+    def compute_Vth(self, external_current):
+        return np.zeros(self.network_Size)
+
+    def forward_Network(self, time, state, contact_input_current=None):
+        voltage, synaptic = np.split(state, 2)
+        current = self.interp_i_Ext(time)
+        if contact_input_current is not None:
+            current = current + contact_input_current
+        return np.concatenate(
+            (-0.2 * (voltage + 35.0) + current, 0.01 * (voltage + 35.0) - 0.01 * synaptic)
+        )
+
+    def forward_network_Jacobian(self, time, state):
+        diagonal = np.concatenate(
+            (-0.2 * np.ones(self.network_Size), -0.01 * np.ones(self.network_Size))
+        )
+        return np.diag(diagonal)
+
+
+class SharedWorldTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.body_template = CelegansWorm_MuscleBody(np.zeros((96, 279)))
+
+    def make_agent(self, name, y_offset=0.0):
+        network = _IndependentTestNetwork()
+        body = copy.deepcopy(self.body_template)
+        body.initcond[1] += y_offset
+        return WormAgent(network, body, np.zeros(279), name)
+
+    def test_two_noninteracting_worms_match_independent_runs(self):
+        times = np.array([0.0, 0.01, 0.02])
+        single = run_single_worm(
+            self.make_agent("single"), times, mechanical_contact=False
+        )["agents"][0]
+        paired = run_two_worms(
+            self.make_agent("first"),
+            self.make_agent("second"),
+            times,
+            mechanical_contact=False,
+            sensory_contact=False,
+        )
+        for key in ("v_solution", "s_solution", "muscle_force", "body_state"):
+            np.testing.assert_allclose(
+                paired["agents"][0][key], single[key], rtol=1e-10, atol=1e-10
+            )
+            np.testing.assert_allclose(
+                paired["agents"][1][key], single[key], rtol=1e-10, atol=1e-10
+            )
+        for result in paired["agents"]:
+            np.testing.assert_array_equal(
+                result["contact_force"], np.zeros_like(result["contact_force"])
+            )
+
+    def test_separated_worms_have_zero_force_with_mechanics_enabled(self):
+        world = run_two_worms(
+            self.make_agent("separated-a"),
+            self.make_agent("separated-b", y_offset=1.0),
+            np.array([0.0, 0.01]),
+            mechanical_contact=True,
+            contact_stiffness=1.0,
+            contact_radii=(0.05, 0.05),
+        )
+        for result in world["agents"]:
+            np.testing.assert_array_equal(
+                result["contact_force"], np.zeros_like(result["contact_force"])
+            )
+
+    def test_mechanical_contact_changes_integrated_body_motion(self):
+        times = np.array([0.0, 0.01, 0.02])
+        independent = run_two_worms(
+            self.make_agent("free-a"),
+            self.make_agent("free-b", 0.05),
+            times,
+            mechanical_contact=False,
+            sensory_contact=False,
+            contact_radii=(0.05, 0.05),
+        )
+        coupled = run_two_worms(
+            self.make_agent("contact-a"),
+            self.make_agent("contact-b", 0.05),
+            times,
+            mechanical_contact=True,
+            contact_stiffness=0.2,
+            contact_radii=(0.05, 0.05),
+        )
+        force = coupled["agents"][0]["contact_force"]
+        self.assertGreater(np.max(np.linalg.norm(force, axis=2)), 0.0)
+        body_change = np.linalg.norm(
+            coupled["agents"][0]["body_state"][-1]
+            - independent["agents"][0]["body_state"][-1]
+        )
+        self.assertGreater(body_change, 1e-8)
+
+    def test_sensory_contact_is_separate_and_changes_touch_cell_activity(self):
+        times = np.array([0.0, 0.01, 0.02])
+        no_sensory = run_two_worms(
+            self.make_agent("base-a"),
+            self.make_agent("base-b", 0.05),
+            times,
+            mechanical_contact=False,
+            sensory_contact=False,
+            contact_radii=(0.05, 0.05),
+        )
+        sensory = run_two_worms(
+            self.make_agent("sensory-a"),
+            self.make_agent("sensory-b", 0.05),
+            times,
+            mechanical_contact=False,
+            sensory_contact=True,
+            contact_stiffness=0.2,
+            contact_radii=(0.05, 0.05),
+            sensory_gain_pA_per_force=1.0,
+        )
+        first, second = sensory["agents"]
+        self.assertGreater(np.max(first["contact_sensory_current"]), 0.0)
+        self.assertGreater(
+            np.max(np.abs(first["v_solution"][:, 276] - no_sensory["agents"][0]["v_solution"][:, 276])),
+            0.0,
+        )
+        non_touch = np.ones(279, dtype=bool)
+        non_touch[[76, 80, 192, 196, 197, 227, 276, 278]] = False
+        self.assertTrue(np.all(first["contact_sensory_current"][:, non_touch] == 0.0))
+        self.assertFalse(np.shares_memory(first["v_solution"], second["v_solution"]))
+        self.assertFalse(np.shares_memory(first["body_state"], second["body_state"]))
+
+    def test_contact_force_integrates_into_original_body_rhs(self):
+        body = copy.deepcopy(self.body_template)
+        muscle = np.zeros(body.body_SegCount * 2)
+        no_contact = body.forward_Body(0.0, body.initcond, muscle)
+        nodal_force = np.zeros((body.body_SegCount, 2))
+        nodal_force[:, 1] = 0.01
+        with_contact = body.forward_Body(
+            0.0, body.initcond, muscle, nodal_force
+        )
+        self.assertGreater(np.linalg.norm(with_contact - no_contact), 0.0)
+
+    def test_repeated_contact_stays_finite_and_refinement_converges(self):
+        coarse_times = np.array([0.0, 0.01, 0.02])
+        fine_times = np.array([0.0, 0.005, 0.01, 0.015, 0.02])
+        coarse = run_two_worms(
+            self.make_agent("coarse-a"),
+            self.make_agent("coarse-b", 0.05),
+            coarse_times,
+            contact_stiffness=0.1,
+            contact_radii=(0.05, 0.05),
+        )
+        fine = run_two_worms(
+            self.make_agent("fine-a"),
+            self.make_agent("fine-b", 0.05),
+            fine_times,
+            contact_stiffness=0.1,
+            contact_radii=(0.05, 0.05),
+        )
+        for result in coarse["agents"] + fine["agents"]:
+            self.assertTrue(np.isfinite(result["body_state"]).all())
+            self.assertTrue(np.isfinite(result["contact_force"]).all())
+        np.testing.assert_allclose(
+            coarse["agents"][0]["body_state"][-1],
+            fine["agents"][0]["body_state"][-1],
+            rtol=2e-3,
+            atol=2e-3,
+        )
+        self.assertGreater(coarse["solver"]["body_nfev"], 0)
+
+    def test_touch_proxy_uses_only_identified_mechanosensory_neurons(self):
+        nodal_force = np.zeros((24, 2))
+        nodal_force[20, 1] = 2.0
+        current = contact_sensory_current(
+            nodal_force, 279, gain_pA_per_force=0.5
+        )
+        self.assertGreater(current[276], 0.0)
+        self.assertGreater(current[278], 0.0)
+        self.assertEqual(np.count_nonzero(current), 2)
+        with self.assertRaises(ValueError):
+            contact_sensory_current(
+                nodal_force, 279, gain_pA_per_force=-1.0
+            )
 
 
 if __name__ == "__main__":

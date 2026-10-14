@@ -76,13 +76,15 @@ def fwd_i_Serotonin(self, v, t = 0.0):
 
     return serotonin_modulation.current_vector(v, t)
 
-def fwd_i_PDFR1(self, v):
+def fwd_i_PDFR1(self, v, signal_state=None):
 
     pdf_modulation = getattr(self, 'pdfr1_modulation', None)
     if pdf_modulation is None or not pdf_modulation.enabled:
         return np.zeros_like(v, dtype=float)
 
-    return pdf_modulation.hypothesis_current_vector(len(v))
+    return pdf_modulation.hypothesis_current_vector(
+        len(v), signal_state=signal_state
+    )
 
 def fwd_activity_Chemical(self, v, s, vth):
 

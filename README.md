@@ -13,9 +13,11 @@ The constructed model is customizable and is reusable. The underlying components
 # Dependencies
 
 #### Python (>3.11 recommended):
-scipy, matplotlib, statsmodels, ipython, jupyter, ffmpeg, seaborn, pyjulia
+scipy, matplotlib, statsmodels, ipython, jupyter, ffmpeg, seaborn
 #### Julia (>1.9 recommended):
 DifferentialEquations, OrdinaryDiffEq, Sundials, LinearAlgebra, LogExpFunctions, Interpolations, StatsBase
+
+`juliacall` is optional for the Python-only simulation paths and is needed only when selecting Julia-backed functions. Python import does not initialize Julia. A Julia-backed call explicitly checks its runtime and packages and raises `JuliaBackendUnavailableError` if they are not usable.
 
 # Installation and Demo
 
@@ -23,6 +25,16 @@ You can find installation instruction for both Mac and Windows under /pdf_tutori
 \
 \
 You can also find the tutorial slides going over the demo notebooks "modWorm quick-start.pdf" under /pdf_tutorials.
+
+# Python numerical and shared-world simulations
+
+Python integrations validate solver success, requested sample times, state dimensions, and finite values. Incomplete integrations raise `NumericalIntegrationError` instead of returning uncomputed zero-filled samples.
+
+`modWorm.shared_world` provides `WormAgent`, `run_single_worm`, and `run_two_worms`. Each paired agent has independent neural, muscle, body, and optional PDFR-1 state. Body contact forces are recomputed inside the shared body ODE and mechanical contact and contact-derived touch-cell currents can be enabled independently. The contact stiffness, touch-cell locations, and current gain are exploratory parameters, not calibrated biological measurements; the shared neural/body integration is operator-split on the common sample clock.
+
+Run `neuromodulation_collective_locomotion_experiment.ipynb` for quick or longer full-connectome comparisons of baseline locomotion, serotonin controls, the PDF-1 signaling hypothesis, independent worms, mechanical contact, mechanosensory contact, and observational two-worm proximity/clustering metrics. The notebook produces its trajectories and neural, muscle, body, and force measurements by executing these Python modules. It does not claim persistent roaming/dwelling states or population-level attraction.
+
+On Windows in the `celegan` environment (Python 3.14.8, SciPy 1.18.1), the final quick full-connectome notebook baseline with six samples over 0.05 s completed in 6.10 s and used 880 body RHS evaluations across five intervals. Profiling a 0.01 s full-connectome neural/muscle/body run identified dense BDF Jacobian factorization as a major cost: converting the existing analytic Jacobian to CSC sparse form reduced its standalone neural solve from 0.804 s to 0.253 s, with identical solver counts (92 RHS evaluations, 2 Jacobians, 14 factorizations) and maximum absolute trajectory difference of `1.82e-12`. The profiled end-to-end shared-world run took 0.416 s; after the sparse change, BDF RHS evaluations and body RK45 integration remain notable costs. A representative zero-muscle 0.01 s body step used 188 RHS evaluations with RK45 versus 221 with DOP853 at `rtol=2.5e-6`, `atol=1e-3`; median times were 0.069 s and 0.073 s. Recurrence vectorization and sparse-Jacobian equivalence are tested against the original equations; these measurements do not imply biological calibration or a broad speedup.
 
 # How to cite
 

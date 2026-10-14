@@ -92,14 +92,15 @@ class CelegansWorm_MuscleBody:
         # If using these function: (without proprioceptive/sensory feedback) set single_step = False
         #                          (with proprioceptive/sensory feedback) set single_step = True
         
-        muscle_Inputs = m_dyn.fwd_muscle_Inputs(self, normalized_V, single_step = False)
-        muscle_Calcium = m_dyn.fwd_muscle_Calcium(self, muscle_Inputs, single_step = False)
+        single_step = np.asarray(normalized_V).ndim == 1
+        muscle_Inputs = m_dyn.fwd_muscle_Inputs(self, normalized_V, single_step = single_step)
+        muscle_Calcium = m_dyn.fwd_muscle_Calcium(self, muscle_Inputs, single_step = single_step)
         muscle_Activity = m_dyn.fwd_muscle_Activity(self, muscle_Calcium)
         muscle_Force = m_dyn.fwd_muscle_Force(self, muscle_Activity)
         
         return muscle_Force
     
-    def forward_Body(self, t, y):
+    def forward_Body(self, t, y, muscle_force=None, contact_force=None):
         
         """
             (REQUIRED)
@@ -130,14 +131,31 @@ class CelegansWorm_MuscleBody:
         v_tan, v_norm = b_dyn.fwd_body_Velocity(self, phi, xdot, ydot)
         
         # Body curvature
-        fR = self.interp_muscle_Force(t)[:self.body_SegCount-1]
-        fL = self.interp_muscle_Force(t)[self.body_SegCount:-1]
+        force = self.interp_muscle_Force(t) if muscle_force is None else muscle_force
+        fR = force[:self.body_SegCount-1]
+        fL = force[self.body_SegCount:-1]
         k = b_dyn.fwd_body_Curvature(self, fR, fL)
         
         # Body forces
         Mdiff = b_dyn.fwd_body_ContactMoment(self, phi, phidot, k)
         F_N, F_T = b_dyn.fwd_body_NormalTanForce(self, v_norm, v_tan)
         Wx, Wy, Wx_diff, Wy_diff = b_dyn.fwd_body_Forces(self, phi, F_T, F_N)
+        if contact_force is not None:
+            contact_force = np.asarray(contact_force, dtype=float)
+            if contact_force.shape != (self.body_SegCount, 2) or not np.isfinite(contact_force).all():
+                raise ValueError(
+                    f"contact_force must be a finite ({self.body_SegCount}, 2) array"
+                )
+            Wx = Wx + contact_force[:, 0] / self.body_SegLength
+            Wy = Wy + contact_force[:, 1] / self.body_SegLength
+            weighted_x = self.body_SegLength / self.body_Mass * Wx
+            weighted_y = self.body_SegLength / self.body_Mass * Wy
+            Wx_diff = np.append(
+                weighted_x[:-1] - weighted_x[1:], 0.0
+            )
+            Wy_diff = np.append(
+                weighted_y[:-1] - weighted_y[1:], 0.0
+            )
         
         # Second derivatives for body coordinates/angles
         phi_ddot = b_dyn.fwd_body_D2Angles(self, phi, phidot, Mdiff, Wy_diff, Wx_diff)
@@ -203,7 +221,7 @@ class CelegansWorm_MuscleBody_PPC:
         
         return muscle_Force
     
-    def forward_Body(self, t, y):
+    def forward_Body(self, t, y, muscle_force=None, contact_force=None):
         
         # Unravel the input y into (x,y,phi, dx,dy,dphi)
         xyphi, xyphi_dot = np.split(y, 2)
@@ -217,12 +235,29 @@ class CelegansWorm_MuscleBody_PPC:
         v_tan, v_norm = b_dyn.fwd_body_Velocity(self, phi, xdot, ydot)
         
         # Body curvature
-        k = b_dyn.fwd_body_Curvature(self, self.fR, self.fL)
+        if muscle_force is None:
+            fR, fL = self.fR, self.fL
+        else:
+            fR = muscle_force[:self.body_SegCount-1]
+            fL = muscle_force[self.body_SegCount:-1]
+        k = b_dyn.fwd_body_Curvature(self, fR, fL)
         
         # Body forces
         Mdiff = b_dyn.fwd_body_ContactMoment(self, phi, phidot, k)
         F_N, F_T = b_dyn.fwd_body_NormalTanForce(self, v_norm, v_tan)
         Wx, Wy, Wx_diff, Wy_diff = b_dyn.fwd_body_Forces(self, phi, F_T, F_N)
+        if contact_force is not None:
+            contact_force = np.asarray(contact_force, dtype=float)
+            if contact_force.shape != (self.body_SegCount, 2) or not np.isfinite(contact_force).all():
+                raise ValueError(
+                    f"contact_force must be a finite ({self.body_SegCount}, 2) array"
+                )
+            Wx = Wx + contact_force[:, 0] / self.body_SegLength
+            Wy = Wy + contact_force[:, 1] / self.body_SegLength
+            weighted_x = self.body_SegLength / self.body_Mass * Wx
+            weighted_y = self.body_SegLength / self.body_Mass * Wy
+            Wx_diff = np.append(weighted_x[:-1] - weighted_x[1:], 0.0)
+            Wy_diff = np.append(weighted_y[:-1] - weighted_y[1:], 0.0)
         
         # Second derivatives for body coordinates/angles
         phi_ddot = b_dyn.fwd_body_D2Angles(self, phi, phidot, Mdiff, Wy_diff, Wx_diff)

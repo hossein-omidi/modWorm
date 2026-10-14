@@ -80,7 +80,10 @@ class CelegansWorm_NervousSystem:
         
         return Vth
 
-    def forward_Network(self, t, y):
+    def forward_Network(
+        self, t, y, contact_input_current=None, pdf_signal_state=None,
+        external_current=None,
+    ):
         
         """
             (REQUIRED)
@@ -99,9 +102,11 @@ class CelegansWorm_NervousSystem:
         i_Linear = n_dyn.fwd_i_Linear(self, v)
         i_Electrical = n_inter.fwd_i_Electrical(self, v)
         i_Chemical = n_inter.fwd_i_Chemical(self, v, s)
-        i_Ext = self.interp_i_Ext(t)
+        i_Ext = self.interp_i_Ext(t) if external_current is None else external_current
+        if contact_input_current is not None:
+            i_Ext = i_Ext + contact_input_current
         i_MOD1 = n_dyn.fwd_i_Serotonin(self, v, t)
-        i_PDFR1 = n_dyn.fwd_i_PDFR1(self, v)
+        i_PDFR1 = n_dyn.fwd_i_PDFR1(self, v, pdf_signal_state)
 
         ds = n_dyn.fwd_activity_Chemical(self, v, s, self.compute_Vth(i_Ext))
         if np.any(i_MOD1) or np.any(i_PDFR1):
@@ -176,7 +181,10 @@ class CelegansWorm_NervousSystem_Waveforce:
         
         return n_inter.compute_vth_Linear(self, i_Ext)
 
-    def forward_Network(self, t, y):
+    def forward_Network(
+        self, t, y, contact_input_current=None, pdf_signal_state=None,
+        external_current=None,
+    ):
 
         v, s = y[:self.network_Size], y[self.network_Size:]
         v = v + self.interp_v_Ext(t) # Add waveforce to voltage
@@ -184,9 +192,11 @@ class CelegansWorm_NervousSystem_Waveforce:
         i_Linear = n_dyn.fwd_i_Linear(self, v)
         i_Electrical = n_inter.fwd_i_Electrical(self, v)
         i_Chemical = n_inter.fwd_i_Chemical(self, v, s)
-        i_Ext = self.interp_i_Ext(t)
+        i_Ext = self.interp_i_Ext(t) if external_current is None else external_current
+        if contact_input_current is not None:
+            i_Ext = i_Ext + contact_input_current
         i_MOD1 = n_dyn.fwd_i_Serotonin(self, v, t)
-        i_PDFR1 = n_dyn.fwd_i_PDFR1(self, v)
+        i_PDFR1 = n_dyn.fwd_i_PDFR1(self, v, pdf_signal_state)
 
         ds = n_dyn.fwd_activity_Chemical(self, v, s, self.compute_Vth(i_Ext))
         if np.any(i_MOD1) or np.any(i_PDFR1):
@@ -297,7 +307,10 @@ class CelegansWorm_NervousSystem_PPC:
         
         return input_FDB
 
-    def forward_Network(self, t, y):
+    def forward_Network(
+        self, t, y, contact_input_current=None, pdf_signal_state=None,
+        external_current=None,
+    ):
 
         v, s = y[:self.network_Size], y[self.network_Size:]
         v = v + self.input_FDB # Add FDB input to the voltage
@@ -305,9 +318,11 @@ class CelegansWorm_NervousSystem_PPC:
         i_Linear = n_dyn.fwd_i_Linear(self, v)
         i_Electrical = n_inter.fwd_i_Electrical(self, v)
         i_Chemical = n_inter.fwd_i_Chemical(self, v, s)
-        i_Ext = self.interp_i_Ext(t)
+        i_Ext = self.interp_i_Ext(t) if external_current is None else external_current
+        if contact_input_current is not None:
+            i_Ext = i_Ext + contact_input_current
         i_MOD1 = n_dyn.fwd_i_Serotonin(self, v, t)
-        i_PDFR1 = n_dyn.fwd_i_PDFR1(self, v)
+        i_PDFR1 = n_dyn.fwd_i_PDFR1(self, v, pdf_signal_state)
 
         ds = n_dyn.fwd_activity_Chemical(self, v, s, self.compute_Vth(i_Ext))
         if np.any(i_MOD1) or np.any(i_PDFR1):

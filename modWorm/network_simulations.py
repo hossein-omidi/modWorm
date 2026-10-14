@@ -7,11 +7,14 @@ __author__ = 'Jimin Kim: jk55@u.washington.edu'
 
 import numpy as np
 from scipy import integrate, interpolate
+from scipy.sparse import csc_matrix
 from collections import namedtuple
 
 from modWorm import Main
 from modWorm import network_interactions as n_inter
 from modWorm import utils
+from modWorm import require_julia
+from modWorm.numerics import validate_ivp_solution
 
 #####################################################################################################################################################
 # CONSTRUCTORS ######################################################################################################################################
@@ -96,8 +99,11 @@ def integrate_ode(NN, integration_prep, rtol, atol):
                                   t_eval = t_eval,
                                   rtol = rtol, atol = atol)
 
-        v_sol = sol.y[0, :]
-        cv_sol = sol.y[1:, :]
+        trajectory = validate_ivp_solution(
+            sol, t_eval, len(NN.initcond), operation="single-neuron network integration"
+        )
+        v_sol = trajectory[:, 0]
+        cv_sol = trajectory[:, 1:].T
 
         return {"v_solution": v_sol,
                 "ch_solution": cv_sol}
@@ -107,7 +113,9 @@ def integrate_ode(NN, integration_prep, rtol, atol):
         if 'forward_network_Jacobian' in dir(NN):
 
             sol = integrate.solve_ivp(fun = NN.forward_Network,
-                                      jac = NN.forward_network_Jacobian,  
+                                      jac = lambda t, state: csc_matrix(
+                                          NN.forward_network_Jacobian(t, state)
+                                      ),
                                       t_span = [0, integration_prep.tf],
                                       y0 = NN.initcond, 
                                       method = 'BDF',
@@ -123,8 +131,11 @@ def integrate_ode(NN, integration_prep, rtol, atol):
                                       t_eval = t_eval,
                                       rtol = rtol, atol = atol  )
 
-        v_sol = sol.y[:NN.network_Size, :].T
-        s_sol = sol.y[NN.network_Size:NN.network_Size*2, :].T
+        trajectory = validate_ivp_solution(
+            sol, t_eval, len(NN.initcond), operation="network integration"
+        )
+        v_sol = trajectory[:, :NN.network_Size]
+        s_sol = trajectory[:, NN.network_Size:NN.network_Size*2]
 
         vthmat = np.zeros((integration_prep.nsteps, NN.network_Size))
 
@@ -146,6 +157,7 @@ def integrate_ode(NN, integration_prep, rtol, atol):
 
 def run_network_julia_ensemble(NN_ens, input_mat_ens, extv_mat_ens = False, batch_size = 8, rtol = 5e-6, atol = 1e-3):
 
+    require_julia()
     NN_ens[0].forward_Network()
 
     vars_NN_ens = []
@@ -185,6 +197,7 @@ def run_network_julia_ensemble(NN_ens, input_mat_ens, extv_mat_ens = False, batc
 
 def run_network_julia(NN, input_mat, extv_mat = False, rtol = 5e-6, atol = 1e-3):
 
+    require_julia()
     NN.forward_Network()
 
     nsteps = len(input_mat)
@@ -353,7 +366,14 @@ Main.eval("""
 
         for ens_k in 1:size(NN_ens)[1]
 
-            if NN_ens[1].network_Size == 1
+            modworm_validate_solution(
+                sol_ens[ens_k],
+                integration_prep_ens[ens_k].tf,
+                integration_prep_ens[ens_k].nsteps,
+                "network ensemble trajectory $(ens_k)",
+            )
+
+            if NN_ens[ens_k].network_Size == 1
 
                 v_sol = sol_ens[ens_k][1,:]'
                 cv_sol = sol_ens[ens_k][2:end,:]'
@@ -395,6 +415,7 @@ Main.eval("""
     function integrate_ode_nv(NN, integration_prep, integrator, rtol, atol)
 
         sol = solve(integrator, CVODE_BDF(), saveat = NN.timescale, reltol = rtol, abstol = atol, save_everystep = false)
+        modworm_validate_solution(sol, integration_prep.tf, integration_prep.nsteps, "network")
 
         if NN.network_Size == 1
 

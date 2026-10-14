@@ -17,17 +17,21 @@ from modWorm import Main
 
 def fwd_body_Coordinates(self, x1, y1, xdot1, ydot1, phi, phidot):
 
-    xvec, yvec, xdot, ydot = np.zeros(self.body_SegCount), np.zeros(self.body_SegCount), np.zeros(self.body_SegCount), np.zeros(self.body_SegCount)
-    xvec[0], yvec[0], xdot[0], ydot[0] = x1, y1, xdot1, ydot1
-
-    for j in np.arange(1, len(xvec)):
-
-        j_ = j - 1
-
-        xvec[j] = xvec[j_] + (self.body_SegLength[j] / 2.) * (np.cos(phi[j_]) + np.cos(phi[j]))
-        yvec[j] = yvec[j_] + (self.body_SegLength[j] / 2.) * (np.sin(phi[j_]) + np.sin(phi[j]))
-        xdot[j] = xdot[j_] - (self.body_SegLength[j] / 2.) * (np.sin(phi[j_]) * phidot[j_] + np.sin(phi[j]) * phidot[j])
-        ydot[j] = ydot[j_] + (self.body_SegLength[j] / 2.) * (np.cos(phi[j_]) * phidot[j_] + np.cos(phi[j]) * phidot[j])
+    cosine = np.cos(phi)
+    sine = np.sin(phi)
+    half_lengths = self.body_SegLength[1:] / 2.0
+    x_increment = half_lengths * (cosine[:-1] + cosine[1:])
+    y_increment = half_lengths * (sine[:-1] + sine[1:])
+    x_velocity_increment = half_lengths * (
+        sine[:-1] * phidot[:-1] + sine[1:] * phidot[1:]
+    )
+    y_velocity_increment = half_lengths * (
+        cosine[:-1] * phidot[:-1] + cosine[1:] * phidot[1:]
+    )
+    xvec = np.concatenate(([x1], x1 + np.cumsum(x_increment)))
+    yvec = np.concatenate(([y1], y1 + np.cumsum(y_increment)))
+    xdot = np.concatenate(([xdot1], xdot1 - np.cumsum(x_velocity_increment)))
+    ydot = np.concatenate(([ydot1], ydot1 + np.cumsum(y_velocity_increment)))
 
     return xvec, yvec, xdot, ydot
 
@@ -118,25 +122,15 @@ def fwd_body_D2Angles(self, phi, phidot, Mdiff, Wy_diff, Wx_diff):
 def fwd_body_D2Coordinates(self, phi, phidot, phi_ddot, Wx, Wy):
 
     C_ddot = np.zeros(self.body_SegCount)
-    cs1 = np.cos(phi[0]) * phidot[0]**2 + np.sin(phi[0]) * phi_ddot[0]
-    cs2 = np.cos(phi[1]) * phidot[1]**2 + np.sin(phi[1]) * phi_ddot[1]
-    C_ddot[1] = -self.body_SegLength[1] / 2. * (cs1 + cs2)
-
     S_ddot = np.zeros(self.body_SegCount)
-    sc1 = np.sin(phi[0]) * phidot[0]**2 - np.cos(phi[0]) * phi_ddot[0]
-    sc2 = np.sin(phi[1]) * phidot[1]**2 - np.cos(phi[1]) * phi_ddot[1]
-    S_ddot[1] = -self.body_SegLength[1] / 2. * (sc1 + sc2)
-
-    for j in range(2, self.body_SegCount):
-
-        cs_i = np.cos(phi[j]) * phidot[j]**2 + np.sin(phi[j]) * phi_ddot[j]
-        cs_im1 = np.cos(phi[j-1]) * phidot[j-1]**2 + np.sin(phi[j-1]) * phi_ddot[j-1]
-
-        sc_i = np.sin(phi[j]) * phidot[j]**2 - np.cos(phi[j]) * phi_ddot[j]
-        sc_im1 = np.sin(phi[j-1]) * phidot[j-1]**2 - np.cos(phi[j-1]) * phi_ddot[j-1]
-
-        C_ddot[j] = C_ddot[j-1] - self.body_SegLength[j] / 2. * cs_im1 - self.body_SegLength[j] / 2. * cs_i
-        S_ddot[j] = S_ddot[j-1] - self.body_SegLength[j] / 2. * sc_im1 - self.body_SegLength[j] / 2. * sc_i
+    cs = np.cos(phi) * phidot**2 + np.sin(phi) * phi_ddot
+    sc = np.sin(phi) * phidot**2 - np.cos(phi) * phi_ddot
+    C_ddot[1:] = np.cumsum(
+        -self.body_SegLength[1:] / 2.0 * (cs[:-1] + cs[1:])
+    )
+    S_ddot[1:] = np.cumsum(
+        -self.body_SegLength[1:] / 2.0 * (sc[:-1] + sc[1:])
+    )
 
     m_sum = np.sum(self.body_Mass)
 

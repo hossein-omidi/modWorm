@@ -1,0 +1,60 @@
+name: Clean APIs Config
+version: 1.0.0
+schema: v1
+models:
+  # 1. Claude Opus (Top Choice for Coding & Agent Work)
+  - name: Claude Opus 5.5 (Clean APIs)
+    provider: openai
+    apiBase: https://cleanapis.com/v1
+    model: claude-opus-5.5
+    apiKey: cc_h4yYPaa2DXdV37PDnWD5EORudc6sXOpICEsOjyD8emW1cMWJ
+    roles:
+      - chat
+      - edit
+      - apply
+    defaultCompletionOptions:
+      contextLength: 1000000
+      maxTokens: 32768
+
+  # 2. DeepSeek Pro (Deep Reasoning & Complex Algorithmic Logic)
+  - name: DeepSeek V4 Pro (Clean APIs)
+    provider: openai
+    apiBase: https://cleanapis.com/v1
+    model: deepseek-v4-pro-0813
+    apiKey: cc_h4yYPaa2DXdV37PDnWD5EORudc6sXOpICEsOjyD8emW1cMWJ
+    roles:
+      - chat
+      - edit
+      - apply
+    defaultCompletionOptions:
+      contextLength: 1048576
+      maxTokens: 32768
+
+  # 3. Gemini Flash (Fast & Lightweight for Quick Refactoring)
+  - name: Gemini 3.7 Flash (Clean APIs)
+    provider: openai
+    apiBase: https://cleanapis.com/v1
+    model: gemini-3.7-flash
+    apiKey: cc_h4yYPaa2DXdV37PDnWD5EORudc6sXOpICEsOjyD8emW1cMWJ
+    roles:
+      - chat
+      - edit
+    defaultCompletionOptions:
+      contextLength: 1048576
+      maxTokens: 16384
+
+  # 4. GPT-5.6 Sol (Flagship Reasoning & Vision)
+  - name: GPT-5.6 Sol (Clean APIs)
+    provider: openai
+    apiBase: https://cleanapis.com/v1
+    model: gpt-5.6-sol
+    apiKey: cc_h4yYPaa2DXdV37PDnWD5EORudc6sXOpICEsOjyD8emW1cMWJ
+    roles:
+      - chat
+      - edit
+      - apply
+    defaultCompletionOptions:
+      contextLength: 1050000
+      maxTokens: 32768
+    capabilities:
+      - image_input

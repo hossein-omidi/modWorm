@@ -96,6 +96,7 @@ class PDFR1Modulation:
         network_size: int,
         *,
         gain_pA_per_signal: float | None = None,
+        signal_state: np.ndarray | None = None,
     ) -> np.ndarray:
         """Return an optional, non-channel excitability-bias hypothesis.
 
@@ -113,7 +114,10 @@ class PDFR1Modulation:
             return current
         if max(self.target_indices) >= network_size:
             raise ValueError("network does not contain every PDFR-1 target neuron")
-        current[list(self.target_indices)] = gain * self.signal_state
+        signal = self.signal_state if signal_state is None else np.asarray(signal_state, dtype=float)
+        if signal.shape != (len(self.target_indices),) or not np.isfinite(signal).all():
+            raise ValueError("signal_state must be a finite vector matching the configured targets")
+        current[list(self.target_indices)] = gain * signal
         return current
 
     @staticmethod

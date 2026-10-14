@@ -11,6 +11,8 @@ from collections import namedtuple
 
 from modWorm import utils
 from modWorm import Main
+from modWorm import require_julia
+from modWorm.numerics import validate_ivp_solution
 
 #####################################################################################################################################################
 # CONSTRUCTORS ######################################################################################################################################
@@ -93,9 +95,12 @@ def integrate_ode(NN_mb, integration_prep, stiffness, rtol, atol):
                               t_eval = t_eval,
                               rtol = rtol, atol = atol)
 
-    x0_sol = sol.y[0, :] 
-    y0_sol = sol.y[1, :] 
-    phi_sol = sol.y[2:26, :].T
+    trajectory = validate_ivp_solution(
+        sol, t_eval, len(NN_mb.initcond), operation="body integration"
+    )
+    x0_sol = trajectory[:, 0]
+    y0_sol = trajectory[:, 1]
+    phi_sol = trajectory[:, 2:26]
 
     x, y = solve_xy(NN_mb, x0_sol, y0_sol, phi_sol)
     x_post, y_post = postprocess_xy(NN_mb, x, y)
@@ -112,6 +117,7 @@ def integrate_ode(NN_mb, integration_prep, stiffness, rtol, atol):
 
 def run_body_julia_ensemble(NN_mb_ens, NN_nv_ens, solution_dict_nv_ens, stiffness = False, maxiters = 1e5, batch_size = 8, rtol = 2.5e-6, atol = 1e-3):
 
+    require_julia()
     NN_mb_ens[0].forward_Muscles()
     NN_mb_ens[0].forward_Body()
 
@@ -156,6 +162,7 @@ def run_body_julia_ensemble(NN_mb_ens, NN_nv_ens, solution_dict_nv_ens, stiffnes
 
 def run_body_julia(NN_mb, NN_nv, solution_dict_nv, stiffness = False, maxiters = 1e5, rtol = 2.5e-6, atol = 1e-3):
 
+    require_julia()
     NN_mb.forward_Muscles()
     NN_mb.forward_Body()
 
@@ -322,6 +329,13 @@ Main.eval("""
 
         for ens_k in 1:size(NN_mb_ens)[1]
 
+            modworm_validate_solution(
+                sol_ens[ens_k],
+                integration_prep_ens[ens_k].tf,
+                integration_prep_ens[ens_k].nsteps,
+                "body ensemble trajectory $(ens_k)",
+            )
+
             x0_sol = sol_ens[ens_k][1, :]
             y0_sol = sol_ens[ens_k][2, :]
             phi_sol = sol_ens[ens_k][3:26, :]'
@@ -347,6 +361,7 @@ Main.eval("""
             sol = solve(integrator, DP5(), saveat = NN_mb.timescale, reltol = rtol, abstol = atol, save_everystep = false, maxiters = NN_mb.maxiters)
 
         end
+        modworm_validate_solution(sol, integration_prep.tf, integration_prep.nsteps, "body")
 
         x0_sol = sol[1, :]
         y0_sol = sol[2, :]

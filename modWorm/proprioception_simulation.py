@@ -15,6 +15,8 @@ from modWorm import body_simulations as b_sim
 from modWorm import utils
 
 from modWorm import Main
+from modWorm import require_julia
+from modWorm.numerics import NumericalIntegrationError, validate_ode_step
 
 #####################################################################################################################################################
 # MASTER FUNCTIONS ##################################################################################################################################
@@ -41,13 +43,13 @@ def prep_integration(NN_nv, NN_mb, input_mat, extv_mat, interp_method):
     timepoints = np.linspace(0, tf, nsteps)
 
     # Solution placeholders for nervous system states
-    v_solution = np.zeros((nsteps, NN_nv.network_Size))
-    s_solution = np.zeros((nsteps, NN_nv.network_Size))
-    vthmat = np.zeros((nsteps, NN_nv.network_Size))
+    v_solution = np.full((nsteps, NN_nv.network_Size), np.nan)
+    s_solution = np.full((nsteps, NN_nv.network_Size), np.nan)
+    vthmat = np.full((nsteps, NN_nv.network_Size), np.nan)
 
     # Solution placeholders for muscles and body states
-    muscle_force = np.zeros((nsteps, NN_mb.body_SegCount * 2))
-    b_solution = np.zeros((nsteps, 2+NN_mb.body_SegCount))
+    muscle_force = np.full((nsteps, NN_mb.body_SegCount * 2), np.nan)
+    b_solution = np.full((nsteps, 2+NN_mb.body_SegCount), np.nan)
 
     # Interpolate input and external voltage matrix
     NN_nv.interp_i_Ext = interpolate.interp1d(timepoints, input_mat, axis=0, kind = interp_method, fill_value = "extrapolate")
@@ -113,7 +115,12 @@ def integrate_ode(NN_nv, NN_mb, r_nv, r_mb, integration_prep):
 
     k = 0
 
-    while r_nv.successful() and r_mb.successful() and k < integration_prep.nsteps - 1:
+    while k < integration_prep.nsteps - 1:
+        if not r_nv.successful() or not r_mb.successful():
+            raise NumericalIntegrationError(
+                f"Proprioceptive integration failed before sample {k} "
+                f"(neural t={r_nv.t}, body t={r_mb.t})"
+            )
 
         # update vth
         integration_prep.vthmat[k, :] = NN_nv.compute_Vth(integration_prep.input_mat[k])
@@ -132,15 +139,39 @@ def integrate_ode(NN_nv, NN_mb, r_nv, r_mb, integration_prep):
             pdf_signal_solution[k + 1, :] = pdf_modulation.advance(
                 NN_nv.timescale, r_nv.t
             )
-        r_nv.integrate(r_nv.t + NN_nv.timescale)
-        r_mb.integrate(r_mb.t + NN_nv.timescale)
+        target_time = (k + 1) * NN_nv.timescale
+        r_nv.integrate(target_time)
+        neural_state = validate_ode_step(
+            r_nv, target_time, len(NN_nv.initcond),
+            operation="neural integration", step_index=k + 1,
+        )
+        r_mb.integrate(target_time)
+        body_state = validate_ode_step(
+            r_mb, target_time, len(NN_mb.initcond),
+            operation="body integration", step_index=k + 1,
+        )
 
         # update v, s, and body locs
-        integration_prep.v_solution[k+1, :] = r_nv.y[:NN_nv.network_Size]
-        integration_prep.s_solution[k+1, :] = r_nv.y[NN_nv.network_Size:NN_nv.network_Size*2]
-        integration_prep.b_solution[k+1, :] = r_mb.y[:2+NN_mb.body_SegCount]
+        integration_prep.v_solution[k+1, :] = neural_state[:NN_nv.network_Size]
+        integration_prep.s_solution[k+1, :] = neural_state[NN_nv.network_Size:NN_nv.network_Size*2]
+        integration_prep.b_solution[k+1, :] = body_state[:2+NN_mb.body_SegCount]
 
         k += 1
+
+    integration_prep.vthmat[-1, :] = NN_nv.compute_Vth(integration_prep.input_mat[-1])
+    integration_prep.muscle_force[-1, :] = NN_mb.forward_Muscles(
+        integration_prep.v_solution[-1, :], integration_prep.vthmat[-1, :]
+    )
+    if not (
+        np.isfinite(integration_prep.v_solution).all()
+        and np.isfinite(integration_prep.s_solution).all()
+        and np.isfinite(integration_prep.vthmat).all()
+        and np.isfinite(integration_prep.muscle_force).all()
+        and np.isfinite(integration_prep.b_solution).all()
+    ):
+        raise NumericalIntegrationError(
+            "Proprioceptive integration left one or more trajectory samples uncomputed"
+        )
 
     x0, y0 = integration_prep.b_solution[:, 0], integration_prep.b_solution[:, 1]
     phi = integration_prep.b_solution[:, 2:26]
@@ -168,6 +199,7 @@ def integrate_ode(NN_nv, NN_mb, r_nv, r_mb, integration_prep):
 def run_network_julia_ensemble(NN_nv_ens, NN_mb_ens, input_mat_ens, extv_mat_ens = False, stiffness_mb = False, maxiters_mb = 1e6, verbose_period = False, 
                                rtol_nv = 5e-6, atol_nv = 1e-3, rtol_mb = 2.5e-6, atol_mb = 1e-3):
 
+    require_julia()
     NN_nv_ens[0].forward_Network()
     NN_nv_ens[0].compute_Vth()
     NN_nv_ens[0].proprioceptive_FDB()
@@ -219,6 +251,7 @@ def run_network_julia_ensemble(NN_nv_ens, NN_mb_ens, input_mat_ens, extv_mat_ens
 def run_network_julia(NN_nv, NN_mb, input_mat, extv_mat = False, stiffness_mb = False, maxiters_mb = 1e6, verbose_period = False, 
                       rtol_nv = 5e-6, atol_nv = 1e-3, rtol_mb = 2.5e-6, atol_mb = 1e-3):
 
+    require_julia()
     NN_nv.forward_Network()
     NN_nv.compute_Vth()
     NN_nv.proprioceptive_FDB()
@@ -361,12 +394,12 @@ Main.eval("""
 
     function prep_network_integration_ppc(NN_nv, NN_mb)
 
-        v_solution = zeros(NN_nv.nsteps, NN_nv.network_Size)
-        s_solution = zeros(NN_nv.nsteps, NN_nv.network_Size)
-        vthmat = zeros(NN_nv.nsteps, NN_nv.network_Size)
+        v_solution = fill(NaN, NN_nv.nsteps, NN_nv.network_Size)
+        s_solution = fill(NaN, NN_nv.nsteps, NN_nv.network_Size)
+        vthmat = fill(NaN, NN_nv.nsteps, NN_nv.network_Size)
 
-        muscle_force = zeros(NN_nv.nsteps, NN_mb.body_SegCount * 2)
-        b_solution = zeros(NN_nv.nsteps, 2+NN_mb.body_SegCount)
+        muscle_force = fill(NaN, NN_nv.nsteps, NN_mb.body_SegCount * 2)
+        b_solution = fill(NaN, NN_nv.nsteps, 2+NN_mb.body_SegCount)
 
         return (input_mat = NN_nv.input_mat,
                 nsteps = NN_nv.nsteps,
@@ -444,6 +477,15 @@ Main.eval("""
 
             step!(integrator_nv, NN_nv.timescale, true)
             step!(integrator_mb, NN_mb.timescale, true)
+            expected_time = k * NN_nv.timescale
+            isapprox(integrator_nv.t, expected_time; rtol=1e-10, atol=1e-12) ||
+                error("neural integrator stopped at t=$(integrator_nv.t), expected t=$expected_time")
+            isapprox(integrator_mb.t, expected_time; rtol=1e-10, atol=1e-12) ||
+                error("body integrator stopped at t=$(integrator_mb.t), expected t=$expected_time")
+            all(isfinite, integrator_nv.u) ||
+                error("neural integrator returned a non-finite state at sample $(k+1)")
+            all(isfinite, integrator_mb.u) ||
+                error("body integrator returned a non-finite state at sample $(k+1)")
 
             integration_prep.v_solution[k+1, :] = integrator_nv.u[1:NN_nv.network_Size]
             integration_prep.s_solution[k+1, :] = integrator_nv.u[NN_nv.network_Size+1:NN_nv.network_Size*2]
@@ -458,6 +500,17 @@ Main.eval("""
             k += 1
 
         end
+
+        integration_prep.vthmat[end, :] = compute_Vth(NN_nv, integration_prep.input_mat[end, :])
+        integration_prep.muscle_force[end, :] = forward_Muscles(
+            NN_mb, integration_prep.v_solution[end, :], integration_prep.vthmat[end, :]
+        )
+        all(isfinite, integration_prep.v_solution) &&
+            all(isfinite, integration_prep.s_solution) &&
+            all(isfinite, integration_prep.vthmat) &&
+            all(isfinite, integration_prep.muscle_force) &&
+            all(isfinite, integration_prep.b_solution) ||
+            error("proprioceptive integration left uncomputed or non-finite samples")
 
         x0, y0 = integration_prep.b_solution[:, 1], integration_prep.b_solution[:, 2]
         phi = integration_prep.b_solution[:, 3:end]
