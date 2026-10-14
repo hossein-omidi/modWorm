@@ -21,6 +21,19 @@ class SerotoninModulationTests(unittest.TestCase):
             0.0,
         )
 
+    def test_hill_dose_response_is_monotone_and_saturating(self):
+        modulation = SerotoninModulation()
+        doses = [0.0, 0.1, 1.0, 5.0, 1e6]
+        responses = []
+        for dose in doses:
+            modulation.set_concentration(dose)
+            responses.append(modulation.receptor_activation(0.0))
+
+        self.assertEqual(responses[0], 0.0)
+        self.assertTrue(np.all(np.diff(responses) > 0.0))
+        self.assertLess(responses[-1], 1.0)
+        self.assertGreater(responses[-1], 0.999)
+
     def test_time_varying_control_and_disabled_layer(self):
         modulation = SerotoninModulation(concentration=lambda time: time * 2.0)
 

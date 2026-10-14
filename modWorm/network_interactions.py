@@ -7,6 +7,7 @@ __author__ = 'Jimin Kim: jk55@u.washington.edu'
 
 import numpy as np
 from scipy import sparse, linalg
+from scipy.special import expit
 
 from modWorm import Main
 
@@ -99,7 +100,7 @@ def fwd_jacobian12_Linear(self, v, s, t = 0.0):
 
 def fwd_jacobian34_Linear(self, v, s, vth):
 
-    sigmoid_V = np.reciprocal(1.0 + np.exp(-self.neuron_Chemical[2]*(v - vth))) # n
+    sigmoid_V = expit(self.neuron_Chemical[2] * (v - vth)) # n
     J3_1 = np.multiply(self.neuron_Chemical[0], 1 - s) # n
     J3_2 = np.multiply(self.neuron_Chemical[2], sigmoid_V) # n
     J3_3 = 1 - sigmoid_V # n
@@ -191,7 +192,7 @@ Main.eval("""
 
     function compute_vth_Linear(p, i_ext, correction_term = 0)
 
-        return p.UU_vth \ (p.LL_vth \ (p.bb_vth .- i_ext)) .+ correction_term
+        return p.UU_vth \\ (p.LL_vth \\ (p.bb_vth .- i_ext)) .+ correction_term
 
     end
 

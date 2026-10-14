@@ -1,15 +1,17 @@
-"""Compare zero- and 5-uM serotonin during a Python-solver locomotion run.
+"""Compare baseline, zero-dose, and 5-uM serotonin in the Python solver.
 
 Usage:
-    python examples/test_serotonin.py CONNECTOME.xlsx MUSCLE_MAP.xlsx INPUT.npy
+    python examples/test_serotonin.py CONNECTOME.xls MUSCLE_MAP.xls INPUT.npy
 
 INPUT.npy must be the desired time-by-279 external-current matrix in pA.
+Measured behavior is reported, not asserted to have a predetermined direction.
 """
 
 import argparse
 from pathlib import Path
 
 import numpy as np
+from scipy.special import expit
 
 from modWorm import (
     body_simulations,
@@ -19,10 +21,10 @@ from modWorm import (
     predefined_classes_nv,
     utils,
 )
-from modWorm.serotonin import SerotoninModulation
+from modWorm.serotonin import NEURON_INDICES, SerotoninModulation
 
 
-AIY_INDICES = np.array([133, 137])
+AIY_INDICES = np.array([NEURON_INDICES["AIYL"], NEURON_INDICES["AIYR"]])
 
 
 def run_pair(
@@ -30,6 +32,8 @@ def run_pair(
     muscle_map_file: Path,
     input_file: Path,
     connectome_dataset: str,
+    max_steps: int | None = None,
+    seed: int = 20261014,
 ) -> None:
     connectome_loader = {
         "varshney": utils.construct_connectome_Varshney,
@@ -40,7 +44,14 @@ def run_pair(
     input_matrix = np.load(input_file)
     if input_matrix.ndim != 2 or input_matrix.shape[1] != 279:
         raise ValueError("INPUT.npy must have shape (timepoints, 279)")
+    if max_steps is not None:
+        if max_steps < 2:
+            raise ValueError("max_steps must be at least 2")
+        input_matrix = input_matrix[:max_steps]
+    if len(input_matrix) < 2:
+        raise ValueError("INPUT.npy must contain at least two timepoints")
 
+    np.random.seed(seed)
     base_network = predefined_classes_nv.CelegansWorm_NervousSystem(
         gap_connectome, syn_connectome
     )
@@ -80,7 +91,7 @@ def run_pair(
     np.testing.assert_array_equal(
         zero_solution["v_threshold"], base_solution["v_threshold"]
     )
-    for network in (zero_network, serotonin_network):
+    for network in (base_network, zero_network, serotonin_network):
         np.testing.assert_array_equal(network.network_Electrical, original_gap)
         np.testing.assert_array_equal(network.network_Chemical, original_syn)
 
@@ -105,24 +116,18 @@ def run_pair(
 
     threshold = serotonin_solution["v_threshold"]
     widths = network_params.CE.B[AIY_INDICES]
-    base_activity = 1.0 / (
-        1.0
-        + np.exp(
-            -widths
-            * (
-                base_solution["v_solution"][:, AIY_INDICES]
-                - base_solution["v_threshold"][:, AIY_INDICES]
-            )
+    base_activity = expit(
+        widths
+        * (
+            base_solution["v_solution"][:, AIY_INDICES]
+            - base_solution["v_threshold"][:, AIY_INDICES]
         )
     )
-    serotonin_activity = 1.0 / (
-        1.0
-        + np.exp(
-            -widths
-            * (
-                serotonin_solution["v_solution"][:, AIY_INDICES]
-                - threshold[:, AIY_INDICES]
-            )
+    serotonin_activity = expit(
+        widths
+        * (
+            serotonin_solution["v_solution"][:, AIY_INDICES]
+            - threshold[:, AIY_INDICES]
         )
     )
     ai_y_base = float(np.mean(base_activity))
@@ -145,8 +150,12 @@ def run_pair(
     print(f"AIY mean activation, 5 uM: {ai_y_serotonin:.6g}")
     print(f"Mean body speed, 0 uM: {base_speed:.6g}")
     print(f"Mean body speed, 5 uM: {serotonin_speed:.6g}")
-    assert ai_y_serotonin < ai_y_base, "AIY activation did not decrease"
-    assert serotonin_speed < base_speed, "Body speed did not decrease"
+    if max_steps is not None:
+        print(
+            f"Short-run diagnostic only: {max_steps} samples "
+            f"({(max_steps - 1) * serotonin_network.timescale:.3g} s); "
+            "do not interpret as a persistent behavioral state."
+        )
     print("Zero-serotonin output and connectomes exactly match the base model.")
 
 
@@ -160,12 +169,20 @@ def main() -> None:
         choices=("varshney", "cook"),
         default="varshney",
     )
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        help="optional short diagnostic run; full input is used when omitted",
+    )
+    parser.add_argument("--seed", type=int, default=20261014)
     args = parser.parse_args()
     run_pair(
         args.connectome_file,
         args.muscle_map_file,
         args.input_file,
         args.connectome_dataset,
+        args.max_steps,
+        args.seed,
     )
 
 

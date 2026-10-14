@@ -87,7 +87,11 @@ def configure_ode_solver(NN_nv, NN_mb, stiffness_mb, rtol_nv, atol_nv, rtol_mb, 
 
     else:
 
-        r_mb = integrate.ode(NN_mb.forward_Body).set_integrator('Radau', rtol = rtol_mb, atol = atol_mb)
+        # scipy.integrate.ode does not provide a Radau integrator; use its
+        # supported stiff VODE/BDF implementation for the legacy step API.
+        r_mb = integrate.ode(NN_mb.forward_Body).set_integrator(
+            'vode', rtol=rtol_mb, atol=atol_mb, method='bdf'
+        )
 
     r_nv.set_initial_value(NN_nv.initcond, 0)
     r_mb.set_initial_value(NN_mb.initcond, 0)
@@ -99,6 +103,13 @@ def integrate_ode(NN_nv, NN_mb, r_nv, r_mb, integration_prep):
     integration_prep.v_solution[0, :] = NN_nv.initcond[:NN_nv.network_Size]
     integration_prep.s_solution[0, :] = NN_nv.initcond[NN_nv.network_Size:NN_nv.network_Size*2]
     integration_prep.b_solution[0, :] = NN_mb.initcond[:2+NN_mb.body_SegCount]
+    pdf_modulation = getattr(NN_nv, 'pdfr1_modulation', None)
+    pdf_signal_solution = None
+    if pdf_modulation is not None:
+        pdf_signal_solution = np.zeros(
+            (integration_prep.nsteps, len(pdf_modulation.target_indices))
+        )
+        pdf_signal_solution[0, :] = pdf_modulation.signal_state
 
     k = 0
 
@@ -117,6 +128,10 @@ def integrate_ode(NN_nv, NN_mb, r_nv, r_mb, integration_prep):
                                                    integration_prep.muscle_force, integration_prep.b_solution, k)
 
         # integrate nv and mb
+        if pdf_modulation is not None:
+            pdf_signal_solution[k + 1, :] = pdf_modulation.advance(
+                NN_nv.timescale, r_nv.t
+            )
         r_nv.integrate(r_nv.t + NN_nv.timescale)
         r_mb.integrate(r_mb.t + NN_nv.timescale)
 
@@ -133,15 +148,18 @@ def integrate_ode(NN_nv, NN_mb, r_nv, r_mb, integration_prep):
     x, y = b_sim.solve_xy(NN_mb, x0, y0, phi)
     x_post, y_post = b_sim.postprocess_xy(NN_mb, x, y)
 
-    return {"v_solution" : integration_prep.v_solution,
-            "s_solution": integration_prep.s_solution,
-            "v_threshold" : integration_prep.vthmat,
-            "muscle_force" : integration_prep.muscle_force,
-            "x_solution" : x_post,
-            "y_solution" : y_post,
-            "phi": phi,
-            "NN_nv_id": NN_nv.id,
-            "NN_mb_id": NN_mb.id}
+    solution = {"v_solution" : integration_prep.v_solution,
+                "s_solution": integration_prep.s_solution,
+                "v_threshold" : integration_prep.vthmat,
+                "muscle_force" : integration_prep.muscle_force,
+                "x_solution" : x_post,
+                "y_solution" : y_post,
+                "phi": phi,
+                "NN_nv_id": NN_nv.id,
+                "NN_mb_id": NN_mb.id}
+    if pdf_signal_solution is not None:
+        solution["pdf_signal_solution"] = pdf_signal_solution
+    return solution
 
 #####################################################################################################################################################
 # MASTER FUNCTIONS (Julia) ##########################################################################################################################

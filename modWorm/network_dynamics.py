@@ -6,6 +6,7 @@ Copyright (c) 2024-2025 University of Washington. Developed in UW NeuroAI Lab by
 __author__ = 'Jimin Kim: jk55@u.washington.edu'
 
 import numpy as np
+from scipy.special import expit
 
 from modWorm import Main
 from modWorm import utils
@@ -75,9 +76,17 @@ def fwd_i_Serotonin(self, v, t = 0.0):
 
     return serotonin_modulation.current_vector(v, t)
 
+def fwd_i_PDFR1(self, v):
+
+    pdf_modulation = getattr(self, 'pdfr1_modulation', None)
+    if pdf_modulation is None or not pdf_modulation.enabled:
+        return np.zeros_like(v, dtype=float)
+
+    return pdf_modulation.hypothesis_current_vector(len(v))
+
 def fwd_activity_Chemical(self, v, s, vth):
 
-    synaptic_rise = np.multiply(np.multiply(self.neuron_Chemical[0], (1 - s)), np.reciprocal(1 + np.exp(-self.neuron_Chemical[2]*(v - vth))))
+    synaptic_rise = np.multiply(np.multiply(self.neuron_Chemical[0], (1 - s)), expit(self.neuron_Chemical[2] * (v - vth)))
     synaptic_fall = np.multiply(self.neuron_Chemical[1], s)
     activity_synaptic = np.subtract(synaptic_rise, synaptic_fall)
 

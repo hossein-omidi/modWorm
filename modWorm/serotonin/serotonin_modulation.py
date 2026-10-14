@@ -1,20 +1,29 @@
 """Static MOD-1 modulation driven by an externally supplied serotonin signal."""
 
 from collections.abc import Callable, Sequence
+import json
 from math import isfinite
 from numbers import Real
+from pathlib import Path
 
 import numpy as np
 
 
-NEURON_INDICES = {
-    "ASIL": 75,
-    "ASIR": 89,
-    "AIYR": 133,
-    "AIYL": 137,
-    "RIFR": 148,
-    "RIFL": 158,
-}
+def _load_neuron_indices() -> dict[str, int]:
+    """Read the canonical model ordering instead of maintaining copied indices."""
+    neurons_path = Path(__file__).resolve().parents[1] / "neurons.json"
+    with neurons_path.open(encoding="utf-8") as neuron_file:
+        neurons = json.load(neuron_file)["neurons"]
+
+    indices = {neuron["name"]: neuron["index"] for neuron in neurons}
+    if len(indices) != len(neurons):
+        raise ValueError(f"Duplicate neuron names in {neurons_path}")
+    if set(indices.values()) != set(range(len(neurons))):
+        raise ValueError(f"Neuron indices in {neurons_path} must be contiguous and zero-based")
+    return indices
+
+
+NEURON_INDICES = _load_neuron_indices()
 
 ConcentrationControl = float | Callable[[float], float]
 

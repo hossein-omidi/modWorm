@@ -101,10 +101,11 @@ class CelegansWorm_NervousSystem:
         i_Chemical = n_inter.fwd_i_Chemical(self, v, s)
         i_Ext = self.interp_i_Ext(t)
         i_MOD1 = n_dyn.fwd_i_Serotonin(self, v, t)
+        i_PDFR1 = n_dyn.fwd_i_PDFR1(self, v)
 
         ds = n_dyn.fwd_activity_Chemical(self, v, s, self.compute_Vth(i_Ext))
-        if np.any(i_MOD1):
-            dv = (-(i_Linear + i_Electrical + i_Chemical) - i_MOD1 + i_Ext)/self.neuron_C
+        if np.any(i_MOD1) or np.any(i_PDFR1):
+            dv = (-(i_Linear + i_Electrical + i_Chemical) - i_MOD1 + i_PDFR1 + i_Ext)/self.neuron_C
         else:
             dv = (-(i_Linear + i_Electrical + i_Chemical) + i_Ext)/self.neuron_C
 
@@ -185,10 +186,11 @@ class CelegansWorm_NervousSystem_Waveforce:
         i_Chemical = n_inter.fwd_i_Chemical(self, v, s)
         i_Ext = self.interp_i_Ext(t)
         i_MOD1 = n_dyn.fwd_i_Serotonin(self, v, t)
+        i_PDFR1 = n_dyn.fwd_i_PDFR1(self, v)
 
         ds = n_dyn.fwd_activity_Chemical(self, v, s, self.compute_Vth(i_Ext))
-        if np.any(i_MOD1):
-            dv = (-(i_Linear + i_Electrical + i_Chemical) - i_MOD1 + i_Ext)/self.neuron_C
+        if np.any(i_MOD1) or np.any(i_PDFR1):
+            dv = (-(i_Linear + i_Electrical + i_Chemical) - i_MOD1 + i_PDFR1 + i_Ext)/self.neuron_C
         else:
             dv = (-(i_Linear + i_Electrical + i_Chemical) + i_Ext)/self.neuron_C
 
@@ -305,10 +307,11 @@ class CelegansWorm_NervousSystem_PPC:
         i_Chemical = n_inter.fwd_i_Chemical(self, v, s)
         i_Ext = self.interp_i_Ext(t)
         i_MOD1 = n_dyn.fwd_i_Serotonin(self, v, t)
+        i_PDFR1 = n_dyn.fwd_i_PDFR1(self, v)
 
         ds = n_dyn.fwd_activity_Chemical(self, v, s, self.compute_Vth(i_Ext))
-        if np.any(i_MOD1):
-            dv = (-(i_Linear + i_Electrical + i_Chemical) - i_MOD1 + i_Ext)/self.neuron_C
+        if np.any(i_MOD1) or np.any(i_PDFR1):
+            dv = (-(i_Linear + i_Electrical + i_Chemical) - i_MOD1 + i_PDFR1 + i_Ext)/self.neuron_C
         else:
             dv = (-(i_Linear + i_Electrical + i_Chemical) + i_Ext)/self.neuron_C
 
@@ -419,10 +422,11 @@ class CelegansWorm_NervousSystem_sg:
         i_Chemical = n_inter.fwd_i_Chemical(self, v, s)
         i_Ext = self.i_Ext
         i_MOD1 = n_dyn.fwd_i_Serotonin(self, v, t)
+        i_PDFR1 = n_dyn.fwd_i_PDFR1(self, v)
 
         ds = n_dyn.fwd_activity_Chemical(self, v, s, self.compute_Vth(i_Ext))
-        if np.any(i_MOD1):
-            dv = (-(i_Linear + i_Electrical + i_Chemical) - i_MOD1 + i_Ext)/self.neuron_C
+        if np.any(i_MOD1) or np.any(i_PDFR1):
+            dv = (-(i_Linear + i_Electrical + i_Chemical) - i_MOD1 + i_PDFR1 + i_Ext)/self.neuron_C
         else:
             dv = (-(i_Linear + i_Electrical + i_Chemical) + i_Ext)/self.neuron_C
 
