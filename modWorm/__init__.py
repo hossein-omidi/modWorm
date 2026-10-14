@@ -6,7 +6,8 @@ Copyright (c) 2024-2025 University of Washington. Developed in UW NeuroAI Lab by
 __author__ = 'Jimin Kim: jk55@u.washington.edu'
 __version__ = '1.0.42'
 
-from julia import Main
+# from julia import Main
+from juliacall import Main
 
 Main.eval("""
 

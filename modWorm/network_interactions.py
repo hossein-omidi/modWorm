@@ -75,7 +75,7 @@ def fwd_i_ProprioceptiveDelayed(self, NN_mb, v, s, vth, muscle_force, body_loc, 
 
 #----------------------------------------------------------------------------------------------------------------------------------------------------
 
-def fwd_jacobian12_Linear(self, v, s):
+def fwd_jacobian12_Linear(self, v, s, t = 0.0):
 
     Vrep = np.tile(v, (self.network_Size, 1)) # n x n
     caprep = np.tile(self.neuron_C, (self.network_Size, 1)).T
@@ -85,6 +85,12 @@ def fwd_jacobian12_Linear(self, v, s):
     J1_M2 = np.add(self.network_Electrical, Ggapsumdiag) # n x n
     J1_M3 = np.diag(np.dot(-self.network_Chemical[0], s)) # n x n
     J1 = (J1_M1 + J1_M2 + J1_M3) / caprep # n x n
+
+    serotonin_modulation = getattr(self, 'serotonin_modulation', None)
+    if serotonin_modulation is not None and serotonin_modulation.enabled:
+        serotonin_conductance = serotonin_modulation.conductance_vector(t, self.network_Size)
+        if np.any(serotonin_conductance):
+            J1 -= np.diag(serotonin_conductance / self.neuron_C)
 
     J2_M4_2 = np.subtract(self.network_Chemical[1], np.transpose(Vrep)) # n x n
     J2 = np.multiply(self.network_Chemical[0], J2_M4_2) / caprep # n x n

@@ -100,9 +100,13 @@ class CelegansWorm_NervousSystem:
         i_Electrical = n_inter.fwd_i_Electrical(self, v)
         i_Chemical = n_inter.fwd_i_Chemical(self, v, s)
         i_Ext = self.interp_i_Ext(t)
+        i_MOD1 = n_dyn.fwd_i_Serotonin(self, v, t)
 
         ds = n_dyn.fwd_activity_Chemical(self, v, s, self.compute_Vth(i_Ext))
-        dv = (-(i_Linear + i_Electrical + i_Chemical) + i_Ext)/self.neuron_C
+        if np.any(i_MOD1):
+            dv = (-(i_Linear + i_Electrical + i_Chemical) - i_MOD1 + i_Ext)/self.neuron_C
+        else:
+            dv = (-(i_Linear + i_Electrical + i_Chemical) + i_Ext)/self.neuron_C
 
         return np.concatenate([dv, ds])
 
@@ -122,7 +126,7 @@ class CelegansWorm_NervousSystem:
 
         v, s = np.split(y, 2)
 
-        J1, J2 = n_inter.fwd_jacobian12_Linear(self, v, s)
+        J1, J2 = n_inter.fwd_jacobian12_Linear(self, v, s, t)
         J3, J4 = n_inter.fwd_jacobian34_Linear(self, v, s, self.compute_Vth(self.interp_i_Ext(t)))
 
         J_row1 = np.hstack((J1, J2))
@@ -180,9 +184,13 @@ class CelegansWorm_NervousSystem_Waveforce:
         i_Electrical = n_inter.fwd_i_Electrical(self, v)
         i_Chemical = n_inter.fwd_i_Chemical(self, v, s)
         i_Ext = self.interp_i_Ext(t)
+        i_MOD1 = n_dyn.fwd_i_Serotonin(self, v, t)
 
         ds = n_dyn.fwd_activity_Chemical(self, v, s, self.compute_Vth(i_Ext))
-        dv = (-(i_Linear + i_Electrical + i_Chemical) + i_Ext)/self.neuron_C
+        if np.any(i_MOD1):
+            dv = (-(i_Linear + i_Electrical + i_Chemical) - i_MOD1 + i_Ext)/self.neuron_C
+        else:
+            dv = (-(i_Linear + i_Electrical + i_Chemical) + i_Ext)/self.neuron_C
 
         return np.concatenate([dv, ds])
 
@@ -191,7 +199,7 @@ class CelegansWorm_NervousSystem_Waveforce:
         v, s = np.split(y, 2)
         v = v + self.interp_v_Ext(t) # Add waveforce to voltage
 
-        J1, J2 = n_inter.fwd_jacobian12_Linear(self, v, s)
+        J1, J2 = n_inter.fwd_jacobian12_Linear(self, v, s, t)
         J3, J4 = n_inter.fwd_jacobian34_Linear(self, v, s, self.compute_Vth(self.interp_i_Ext(t)))
 
         J_row1 = np.hstack((J1, J2))
@@ -296,9 +304,13 @@ class CelegansWorm_NervousSystem_PPC:
         i_Electrical = n_inter.fwd_i_Electrical(self, v)
         i_Chemical = n_inter.fwd_i_Chemical(self, v, s)
         i_Ext = self.interp_i_Ext(t)
+        i_MOD1 = n_dyn.fwd_i_Serotonin(self, v, t)
 
         ds = n_dyn.fwd_activity_Chemical(self, v, s, self.compute_Vth(i_Ext))
-        dv = (-(i_Linear + i_Electrical + i_Chemical) + i_Ext)/self.neuron_C
+        if np.any(i_MOD1):
+            dv = (-(i_Linear + i_Electrical + i_Chemical) - i_MOD1 + i_Ext)/self.neuron_C
+        else:
+            dv = (-(i_Linear + i_Electrical + i_Chemical) + i_Ext)/self.neuron_C
 
         return np.concatenate([dv, ds])
 
@@ -307,7 +319,7 @@ class CelegansWorm_NervousSystem_PPC:
         v, s = np.split(y, 2)
         v = v + self.input_FDB # Add FDB input to the voltage
 
-        J1, J2 = n_inter.fwd_jacobian12_Linear(self, v, s)
+        J1, J2 = n_inter.fwd_jacobian12_Linear(self, v, s, t)
         J3, J4 = n_inter.fwd_jacobian34_Linear(self, v, s, self.compute_Vth(self.interp_i_Ext(t)))
 
         J_row1 = np.hstack((J1, J2))
@@ -406,9 +418,13 @@ class CelegansWorm_NervousSystem_sg:
         i_Electrical = n_inter.fwd_i_Electrical(self, v)
         i_Chemical = n_inter.fwd_i_Chemical(self, v, s)
         i_Ext = self.i_Ext
+        i_MOD1 = n_dyn.fwd_i_Serotonin(self, v, t)
 
         ds = n_dyn.fwd_activity_Chemical(self, v, s, self.compute_Vth(i_Ext))
-        dv = (-(i_Linear + i_Electrical + i_Chemical) + i_Ext)/self.neuron_C
+        if np.any(i_MOD1):
+            dv = (-(i_Linear + i_Electrical + i_Chemical) - i_MOD1 + i_Ext)/self.neuron_C
+        else:
+            dv = (-(i_Linear + i_Electrical + i_Chemical) + i_Ext)/self.neuron_C
 
         return np.concatenate([dv, ds])
 
@@ -417,7 +433,7 @@ class CelegansWorm_NervousSystem_sg:
         v, s = np.split(y, 2)
         v = v + self.interp_v_Ext(t)
 
-        J1, J2 = n_inter.fwd_jacobian12_Linear(self, v, s)
+        J1, J2 = n_inter.fwd_jacobian12_Linear(self, v, s, t)
         J3, J4 = n_inter.fwd_jacobian34_Linear(self, v, s, self.compute_Vth(self.i_Ext))
 
         J_row1 = np.hstack((J1, J2))

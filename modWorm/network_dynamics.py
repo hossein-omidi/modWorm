@@ -67,6 +67,14 @@ def fwd_i_Linear(self, v):
 
     return i_linear
 
+def fwd_i_Serotonin(self, v, t = 0.0):
+
+    serotonin_modulation = getattr(self, 'serotonin_modulation', None)
+    if serotonin_modulation is None or not serotonin_modulation.enabled:
+        return np.zeros_like(v, dtype=float)
+
+    return serotonin_modulation.current_vector(v, t)
+
 def fwd_activity_Chemical(self, v, s, vth):
 
     synaptic_rise = np.multiply(np.multiply(self.neuron_Chemical[0], (1 - s)), np.reciprocal(1 + np.exp(-self.neuron_Chemical[2]*(v - vth))))
