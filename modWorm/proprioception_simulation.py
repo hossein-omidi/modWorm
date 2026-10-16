@@ -196,6 +196,23 @@ def integrate_ode(NN_nv, NN_mb, r_nv, r_mb, integration_prep):
 # MASTER FUNCTIONS (Julia) ##########################################################################################################################
 #####################################################################################################################################################
 
+# Native Julia storage for Python-provided NumPy arrays.
+# Sundials must not initialize its solution cache with PythonCall.PyArray.
+# Arrays are copied ONCE at the inter-language boundary; scalar settings
+# and the existing modWorm functions remain unchanged.
+Main.eval("""
+function modworm_native_ppc_dict(raw)
+    native = Dict{String,Any}()
+    for (key, value) in raw
+        native[string(key)] = value isa AbstractArray ? Array(value) : value
+    end
+    return native
+end
+function modworm_native_ppc_dict_list(raws)
+    return [modworm_native_ppc_dict(raw) for raw in raws]
+end
+""")
+
 def run_network_julia_ensemble(NN_nv_ens, NN_mb_ens, input_mat_ens, extv_mat_ens = False, stiffness_mb = False, maxiters_mb = 1e6, verbose_period = False, 
                                rtol_nv = 5e-6, atol_nv = 1e-3, rtol_mb = 2.5e-6, atol_mb = 1e-3):
 
@@ -237,13 +254,17 @@ def run_network_julia_ensemble(NN_nv_ens, NN_mb_ens, input_mat_ens, extv_mat_ens
         vars_NN_mb["fR"] = np.zeros(NN_mb.body_SegCount-1)
         vars_NN_mb["fL"] = np.zeros(NN_mb.body_SegCount-1)
         vars_NN_mb["stiffness"] = stiffness_mb
-        vars_NN_mb["maxiters"] = maxiters_mb
+        vars_NN_mb["maxiters"] = int(maxiters_mb)
         vars_NN_mb["id"] = ens_k
 
         vars_NN_nv_ens.append(vars_NN_nv)
         vars_NN_mb_ens.append(vars_NN_mb)
 
-    ppc_solution_dict_ens = Main.run_network_ppc_ensemble(vars_NN_nv_ens, vars_NN_mb_ens, verbose_period, rtol_nv, atol_nv, rtol_mb, atol_mb)
+    ppc_solution_dict_ens = Main.run_network_ppc_ensemble(
+        Main.modworm_native_ppc_dict_list(vars_NN_nv_ens),
+        Main.modworm_native_ppc_dict_list(vars_NN_mb_ens),
+        verbose_period, rtol_nv, atol_nv, rtol_mb, atol_mb
+    )
     ppc_solution_dict_ens = utils.sort_process_ensemble_sols(ppc_solution_dict_ens, NN_mb_ens)
 
     return ppc_solution_dict_ens
@@ -279,12 +300,19 @@ def run_network_julia(NN_nv, NN_mb, input_mat, extv_mat = False, stiffness_mb = 
     vars_NN_mb["fR"] = np.zeros(NN_mb.body_SegCount-1)
     vars_NN_mb["fL"] = np.zeros(NN_mb.body_SegCount-1)
     vars_NN_mb["stiffness"] = stiffness_mb
-    vars_NN_mb["maxiters"] = maxiters_mb
+    vars_NN_mb["maxiters"] = int(maxiters_mb)
     vars_NN_mb["id"] = 0
 
-    ppc_solution_dict = Main.run_network_ppc(vars_NN_nv, vars_NN_mb, verbose_period, rtol_nv, atol_nv, rtol_mb, atol_mb)
+    ppc_solution_dict = Main.run_network_ppc(
+        Main.modworm_native_ppc_dict(vars_NN_nv),
+        Main.modworm_native_ppc_dict(vars_NN_mb),
+        verbose_period, rtol_nv, atol_nv, rtol_mb, atol_mb
+    )
 
-    x, y = b_sim.solve_xy(NN_mb, ppc_solution_dict["x0"], ppc_solution_dict["y0"], ppc_solution_dict["phi"])
+    x0 = np.asarray(ppc_solution_dict["x0"], dtype=float)
+    y0 = np.asarray(ppc_solution_dict["y0"], dtype=float)
+    phi = np.asarray(ppc_solution_dict["phi"], dtype=float)
+    x, y = b_sim.solve_xy(NN_mb, x0, y0, phi)
     x_post, y_post = b_sim.postprocess_xy(NN_mb, x, y)
 
     ppc_solution_dict["x_solution"] = x_post
@@ -440,7 +468,7 @@ Main.eval("""
 
         if NN_mb.stiffness == true
 
-            integrator_mb = init(r_mb, TRBDF2(autodiff=false), reltol = rtol_mb, abstol = atol_mb, save_everystep = false, maxiters = NN_mb.maxiters)
+            integrator_mb = init(r_mb, CVODE_BDF(), reltol = rtol_mb, abstol = atol_mb, save_everystep = false, maxiters = NN_mb.maxiters)
 
         else
 

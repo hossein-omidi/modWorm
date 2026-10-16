@@ -128,8 +128,7 @@ def init_vth_Linear(self):
     sjmat = np.vstack([s_eq] * self.network_Size) # n x n
     S_eq = s_eq[:, np.newaxis] # n x 1
     Gsyn = np.multiply(sjmat, self.network_Chemical[0]) # n x n
-    Gsyndiag = np.subtract(Gsyn, np.diag(np.diag(Gsyn))) # n x n
-    Gsynsum = Gsyndiag.sum(axis = 1) # n
+    Gsynsum = Gsyn.sum(axis = 1) # n
     M3 = -sparse.spdiags(Gsynsum, 0, self.network_Size, self.network_Size).toarray() # n x n
 
     b3 = np.dot(np.multiply(self.network_Chemical[0], self.network_Chemical[1]), S_eq) # n x 1
@@ -140,13 +139,14 @@ def init_vth_Linear(self):
     bbb = -b1 - b3
     bb = np.reshape(bbb, self.network_Size)
 
+    self.P_vth = P
     self.LL_vth = LL
     self.UU_vth = UU
     self.bb_vth = bb
 
 def compute_vth_Linear(self, i_ext, correction_term = 0):
 
-    b = np.subtract(self.bb_vth, i_ext)
+    b = self.P_vth.T @ np.subtract(self.bb_vth, i_ext)
     vth = linalg.solve_triangular(self.UU_vth, linalg.solve_triangular(self.LL_vth, b, lower = True, check_finite=False), check_finite=False)
 
     return vth + correction_term
@@ -192,7 +192,7 @@ Main.eval("""
 
     function compute_vth_Linear(p, i_ext, correction_term = 0)
 
-        return p.UU_vth \\ (p.LL_vth \\ (p.bb_vth .- i_ext)) .+ correction_term
+        return p.UU_vth \\ (p.LL_vth \\ (p.P_vth' * (p.bb_vth .- i_ext))) .+ correction_term
 
     end
 

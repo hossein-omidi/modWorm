@@ -114,7 +114,20 @@ def construct_connectome_Varshney(filepath):
 # Load connectome data from Cook et al, 2019 with adjustments by Haspel et al, 2012
 # Cook, Steven J., et al. "Whole-animal connectomes of both Caenorhabditis elegans sexes." Nature 571.7763 (2019): 63-71.
 
-def construct_connectome_Cook(filepath):
+def construct_connectome_Cook(filepath=None):
+    """Load Cook adjacency data and apply the checked-in adjustment deltas."""
+    if filepath is None:
+        filepath = os.environ.get("MODWORM_COOK_CONNECTOME")
+    if not filepath:
+        raise FileNotFoundError(
+            "The Cook workbook is required to construct the adjusted connectome. "
+            "Download it from https://www.wormwiring.org/si/SI%205%20Connectome%20"
+            "adjacency%20matrices,%20corrected%20July%202020.xlsx and pass its "
+            "path or set MODWORM_COOK_CONNECTOME."
+        )
+    filepath = os.fspath(filepath)
+    if not os.path.isfile(filepath):
+        raise FileNotFoundError(f"Cook connectome workbook not found: {filepath}")
 
     if platform == 'Windows':
 
@@ -446,7 +459,10 @@ def sort_process_ensemble_sols(solution_dict_ens, NN_mb_ens):
         NN_mb = NN_mb_ens[ens_id]
         assert NN_mb.id == ens_id
 
-        x, y = b_sim.solve_xy(NN_mb, solution_dict["x0"], solution_dict["y0"], solution_dict["phi"])
+        x0 = np.asarray(solution_dict["x0"], dtype=float)
+        y0 = np.asarray(solution_dict["y0"], dtype=float)
+        phi = np.asarray(solution_dict["phi"], dtype=float)
+        x, y = b_sim.solve_xy(NN_mb, x0, y0, phi)
         x_post, y_post = b_sim.postprocess_xy(NN_mb, x, y)
 
         solution_dict["x_solution"] = x_post

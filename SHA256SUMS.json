@@ -1,0 +1,7 @@
+{
+  "README_APPLY_NATIVE_ARRAY_FIX.md": "47cecf641e8ef296632580f34dbe8f0a29df120aa5a8042ba73e8b74f0858963",
+  "apply_julia_native_arrays.py": "bc54d1d2bdf283248fab7df97efdb5d692f3b5af3abcf579912ba47f3acde305",
+  "examples/verify_julia_native_bridge.py": "2f6af82c1e01598ca2154f8d437a3da06da71f0fa29bc26de2bbee5905da03e1",
+  "modWorm/_julia_modulated_ppc.jl": "07573653d05558d8b76b588f2c983146a009a635b18b446f4fceedda18c2fc2a",
+  "tests/test_julia_native_bridge_patch.py": "c6eefcb3c731e9bb8347dd76f7a9cbeb9b02fecf1b573a458d1b4fec55029657"
+}

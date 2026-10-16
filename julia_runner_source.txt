@@ -1,0 +1,47 @@
+def run_network_julia(NN_nv, NN_mb, input_mat, extv_mat = False, stiffness_mb = False, maxiters_mb = 1e6, verbose_period = False, 
+                      rtol_nv = 5e-6, atol_nv = 1e-3, rtol_mb = 2.5e-6, atol_mb = 1e-3):
+
+    require_julia()
+    NN_nv.forward_Network()
+    NN_nv.compute_Vth()
+    NN_nv.proprioceptive_FDB()
+    NN_mb.forward_Muscles()
+    NN_mb.forward_Body()
+
+    nsteps = len(input_mat)
+    tf = (nsteps - 1) * NN_nv.timescale
+    timepoints = np.linspace(0, tf, nsteps)
+    
+    vars_NN_nv = vars(NN_nv)
+    vars_NN_nv["nsteps"] = nsteps
+    vars_NN_nv["tf"] = tf
+    vars_NN_nv["timepoints"] = timepoints
+    vars_NN_nv["input_mat"] = input_mat
+    vars_NN_nv["input_FDB"] = np.zeros(NN_nv.network_Size)
+    vars_NN_nv["id"] = 0
+
+    if type(extv_mat) != bool:
+
+        vars_NN_nv["extv_mat"] = extv_mat
+
+    vars_NN_mb = vars(NN_mb)
+    vars_NN_mb["timescale"] = NN_nv.timescale
+    vars_NN_mb["fR"] = np.zeros(NN_mb.body_SegCount-1)
+    vars_NN_mb["fL"] = np.zeros(NN_mb.body_SegCount-1)
+    vars_NN_mb["stiffness"] = stiffness_mb
+    vars_NN_mb["maxiters"] = maxiters_mb
+    vars_NN_mb["id"] = 0
+
+    ppc_solution_dict = Main.run_network_ppc(
+        Main.modworm_native_ppc_dict(vars_NN_nv),
+        Main.modworm_native_ppc_dict(vars_NN_mb),
+        verbose_period, rtol_nv, atol_nv, rtol_mb, atol_mb
+    )
+
+    x, y = b_sim.solve_xy(NN_mb, ppc_solution_dict["x0"], ppc_solution_dict["y0"], ppc_solution_dict["phi"])
+    x_post, y_post = b_sim.postprocess_xy(NN_mb, x, y)
+
+    ppc_solution_dict["x_solution"] = x_post
+    ppc_solution_dict["y_solution"] = y_post
+
+    return ppc_solution_dict

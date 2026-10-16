@@ -7,6 +7,20 @@ __author__ = 'Jimin Kim: jk55@u.washington.edu'
 __version__ = '1.0.42'
 
 import importlib.util
+import json
+import os
+import sys
+
+
+def _conda_julia_project():
+    if os.environ.get("JULIA_PROJECT") or os.environ.get("PYTHON_JULIACALL_PROJECT"):
+        return None
+
+    prefix = sys.prefix
+    if sys.prefix == sys.base_prefix:
+        prefix = os.environ.get("CONDA_PREFIX", prefix)
+    project = os.path.join(prefix, "julia_env", "Project.toml")
+    return os.path.dirname(project) if os.path.isfile(project) else None
 
 class JuliaBackendUnavailableError(ImportError):
     """Raised when a Julia-backed operation is requested without juliacall."""
@@ -52,6 +66,13 @@ class _JuliaMainAdapter:
                 from juliacall import Main as julia_main
 
                 _JuliaMain = julia_main
+            if self._initialized_sources == 0:
+                project = _conda_julia_project()
+                if project is not None:
+                    project_literal = json.dumps(project)
+                    _JuliaMain.seval(
+                        f"import Pkg; Pkg.activate({project_literal})"
+                    )
             while self._initialized_sources < len(self._deferred_sources):
                 source = self._deferred_sources[self._initialized_sources]
                 _JuliaMain.seval(source)

@@ -126,7 +126,13 @@ def run_body_julia_ensemble(NN_mb_ens, NN_nv_ens, solution_dict_nv_ens, stiffnes
     for ens_k in range(len(NN_mb_ens)):
 
         NN_mb = NN_mb_ens[ens_k]
-        nsteps = len(solution_dict_nv_ens[ens_k]['v_solution'])
+        neural_solution = np.asarray(
+            solution_dict_nv_ens[ens_k]['v_solution'], dtype=float
+        )
+        neural_threshold = np.asarray(
+            solution_dict_nv_ens[ens_k]['v_threshold'], dtype=float
+        )
+        nsteps = neural_solution.shape[0]
         tf = (nsteps - 1)*NN_nv_ens[ens_k].timescale
         timepoints = np.linspace(0, tf, nsteps)
 
@@ -135,9 +141,11 @@ def run_body_julia_ensemble(NN_mb_ens, NN_nv_ens, solution_dict_nv_ens, stiffnes
         vars_NN_mb["nsteps"] = nsteps
         vars_NN_mb["tf"] = tf
         vars_NN_mb["timepoints"] = timepoints
-        vars_NN_mb["muscle_Force"] = Main.forward_Muscles(vars_NN_mb, solution_dict_nv_ens[ens_k]['v_solution'], solution_dict_nv_ens[ens_k]['v_threshold'])
+        vars_NN_mb["muscle_Force"] = Main.forward_Muscles(
+            vars_NN_mb, neural_solution, neural_threshold
+        )
         vars_NN_mb["stiffness"] = stiffness
-        vars_NN_mb["maxiters"] = maxiters
+        vars_NN_mb["maxiters"] = int(maxiters)
 
         vars_NN_mb_ens.append(vars_NN_mb)
 
@@ -147,12 +155,15 @@ def run_body_julia_ensemble(NN_mb_ens, NN_nv_ens, solution_dict_nv_ens, stiffnes
 
     for ens_k in range(len(NN_mb_ens)):
 
-        x, y = solve_xy(NN_mb_ens[ens_k], x0_sol_list[ens_k], y0_sol_list[ens_k], phi_sol_list[ens_k])
+        x0_sol = np.asarray(x0_sol_list[ens_k], dtype=float)
+        y0_sol = np.asarray(y0_sol_list[ens_k], dtype=float)
+        phi_sol = np.asarray(phi_sol_list[ens_k], dtype=float)
+        x, y = solve_xy(NN_mb_ens[ens_k], x0_sol, y0_sol, phi_sol)
         x_post, y_post = postprocess_xy(NN_mb_ens[ens_k], x, y)
 
         mb_sol_dict = {"raw_x_solution": x,
                        "raw_y_solution": y,
-                       "raw_phi_solution": phi_sol_list[ens_k],
+                       "raw_phi_solution": phi_sol,
                        "x_solution": x_post,
                        "y_solution": y_post}
 
@@ -166,7 +177,13 @@ def run_body_julia(NN_mb, NN_nv, solution_dict_nv, stiffness = False, maxiters =
     NN_mb.forward_Muscles()
     NN_mb.forward_Body()
 
-    nsteps = len(solution_dict_nv['v_solution'])
+    neural_solution = np.asarray(
+        solution_dict_nv['v_solution'], dtype=float
+    )
+    neural_threshold = np.asarray(
+        solution_dict_nv['v_threshold'], dtype=float
+    )
+    nsteps = neural_solution.shape[0]
     tf = (nsteps - 1)*NN_nv.timescale
     timepoints = np.linspace(0, tf, nsteps)
 
@@ -175,11 +192,16 @@ def run_body_julia(NN_mb, NN_nv, solution_dict_nv, stiffness = False, maxiters =
     vars_NN_mb["nsteps"] = nsteps
     vars_NN_mb["tf"] = tf
     vars_NN_mb["timepoints"] = timepoints
-    vars_NN_mb["muscle_Force"] = Main.forward_Muscles(vars_NN_mb, solution_dict_nv['v_solution'], solution_dict_nv['v_threshold'])
+    vars_NN_mb["muscle_Force"] = Main.forward_Muscles(
+        vars_NN_mb, neural_solution, neural_threshold
+    )
     vars_NN_mb["stiffness"] = stiffness
-    vars_NN_mb["maxiters"] = maxiters
+    vars_NN_mb["maxiters"] = int(maxiters)
 
     x0_sol, y0_sol, phi_sol = Main.run_body(vars_NN_mb, rtol, atol)
+    x0_sol = np.asarray(x0_sol, dtype=float)
+    y0_sol = np.asarray(y0_sol, dtype=float)
+    phi_sol = np.asarray(phi_sol, dtype=float)
 
     x, y = solve_xy(NN_mb, x0_sol, y0_sol, phi_sol)
     x_post, y_post = postprocess_xy(NN_mb, x, y)
@@ -317,7 +339,7 @@ Main.eval("""
 
         if NN_mb_ens[1].stiffness == true
 
-            sol_ens = solve(integrator_ens, TRBDF2(autodiff=false), EnsembleThreads(), trajectories = size(NN_mb_ens)[1], batch_size = batch_size,
+            sol_ens = solve(integrator_ens, CVODE_BDF(), EnsembleThreads(), trajectories = size(NN_mb_ens)[1], batch_size = batch_size,
                             saveat = NN_mb_ens[1].timescale, reltol = rtol, abstol = atol, save_everystep = false, maxiters = NN_mb_ens[1].maxiters)
 
         else
@@ -354,7 +376,7 @@ Main.eval("""
 
         if NN_mb.stiffness == true
 
-            sol = solve(integrator, TRBDF2(autodiff=false), saveat = NN_mb.timescale, reltol = rtol, abstol = atol, save_everystep = false, maxiters = NN_mb.maxiters)
+            sol = solve(integrator, CVODE_BDF(), saveat = NN_mb.timescale, reltol = rtol, abstol = atol, save_everystep = false, maxiters = NN_mb.maxiters)
 
         else
 
