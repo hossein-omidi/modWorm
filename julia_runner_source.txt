@@ -29,7 +29,7 @@ def run_network_julia(NN_nv, NN_mb, input_mat, extv_mat = False, stiffness_mb = 
     vars_NN_mb["fR"] = np.zeros(NN_mb.body_SegCount-1)
     vars_NN_mb["fL"] = np.zeros(NN_mb.body_SegCount-1)
     vars_NN_mb["stiffness"] = stiffness_mb
-    vars_NN_mb["maxiters"] = maxiters_mb
+    vars_NN_mb["maxiters"] = int(maxiters_mb)
     vars_NN_mb["id"] = 0
 
     ppc_solution_dict = Main.run_network_ppc(
@@ -38,7 +38,10 @@ def run_network_julia(NN_nv, NN_mb, input_mat, extv_mat = False, stiffness_mb = 
         verbose_period, rtol_nv, atol_nv, rtol_mb, atol_mb
     )
 
-    x, y = b_sim.solve_xy(NN_mb, ppc_solution_dict["x0"], ppc_solution_dict["y0"], ppc_solution_dict["phi"])
+    x0 = np.asarray(ppc_solution_dict["x0"], dtype=float)
+    y0 = np.asarray(ppc_solution_dict["y0"], dtype=float)
+    phi = np.asarray(ppc_solution_dict["phi"], dtype=float)
+    x, y = b_sim.solve_xy(NN_mb, x0, y0, phi)
     x_post, y_post = b_sim.postprocess_xy(NN_mb, x, y)
 
     ppc_solution_dict["x_solution"] = x_post
